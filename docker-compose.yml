@@ -1,13 +1,15 @@
 # Local dev environment per SPEC.md §10 global DoD.
+# Host port 3307: the dev machine's native MySQL 8 owns 3306 (DECISIONS.md).
 services:
   db:
-    image: postgres:16
+    image: mysql:8.0
     environment:
-      POSTGRES_USER: hub
-      POSTGRES_PASSWORD: hub
-      POSTGRES_DB: hub
-    ports: ["5433:5432"]
-    volumes: ["hubdb:/var/lib/postgresql/data"]
+      MYSQL_ROOT_PASSWORD: hub
+      MYSQL_USER: hub
+      MYSQL_PASSWORD: hub
+      MYSQL_DATABASE: flowhub
+    ports: ["3307:3306"]
+    volumes: ["hubdb:/var/lib/mysql"]
   # hubd service added by the builder once the binary exists:
   #   build: ./backend  ·  env_file: .env  ·  depends_on: [db]
 volumes:

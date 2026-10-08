@@ -22,20 +22,29 @@ that endpoint truthfully.
 
 ## 1. Scale posture & stack (locked — do not "improve")
 
+> **Amended 2026-10-08** — owner decision, CTO-confirmed: the
+> database engine is **MySQL 8.0**, not PostgreSQL, and the identity
+> model follows the owner's `db_schemas.txt` (PashuTrack pattern:
+> BIGSERIAL ids, tenant-agnostic users joined via `tenant_users`).
+> Driver: `go-sql-driver/mysql` instead of pgx. §6.1 is unchanged.
+> Every deviation is logged in DECISIONS.md.
+
 - Tenants: single digits. Users: hundreds to low thousands. Writes:
   signups/day + one license verify per user per morning. This is a
   small CRUD system with high correctness stakes, NOT a scale
   problem.
 - **Backend:** Go 1.22+, single binary, modular monolith. Router:
-  chi. DB access: pgx (no ORM). Migrations: golang-migrate.
+  chi. DB access: `database/sql` + `go-sql-driver/mysql` (no ORM).
+  Migrations: golang-migrate (mysql driver).
   Passwords & license keys: argon2id (alexedwards/argon2id).
-- **Database:** PostgreSQL 16. One database. Tenancy = `tenant_id`
-  column + scoping enforced in one repository layer (every query
-  takes tenant_id; no query without it except platform-admin paths).
+- **Database:** MySQL 8.0 (dev: 8.0.46). One database. Tenancy =
+  `tenant_id` columns plus the `tenant_users` join for identity,
+  scoping enforced in one repository layer (every query resolves the
+  caller's tenant; no query without it except platform-admin paths).
 - **Frontend:** React + Vite + TypeScript SPA (tenant admin
   dashboard). Minimal dependencies; no component framework required.
 - **Deploy:** one VPS (Mumbai), Caddy for TLS reverse proxy,
-  systemd service, nightly `pg_dump` with a RESTORE TESTED monthly.
+  systemd service, nightly `mysqldump` with a RESTORE TESTED monthly.
 - **Explicitly banned:** microservices, message queues, Kubernetes,
   per-tenant databases, ORMs, GraphQL, payment-gateway processing
   (V1 records payments; it does not move money).
@@ -64,92 +73,121 @@ that endpoint truthfully.
    (`tenant_products`). What this is NOT (banned in §11): bundles,
    per-product user roles, cross-product entitlement logic, SSO.
 
-## 3. Data model (PostgreSQL DDL — authoritative)
+## 3. Data model (MySQL 8 DDL — authoritative)
+
+> **Amended 2026-10-08** — MySQL dialect; `tenants`/`users`/
+> `tenant_users` follow the owner's `db_schemas.txt` verbatim except
+> where noted; the licensing/subscription core keeps this spec's
+> original shape in the new dialect. Required deviations (logged in
+> DECISIONS.md): `users.status` keeps four values so §4 can split
+> `paused` from `revoked`; `grace_period_days` → `grace_working_days`
+> (Mon–Fri); `slug`, `mobile_verified`, `is_house`, product/PII
+> columns added because §4/§6/§7 cannot function without them.
+> `CITEXT` is replaced by the default case-insensitive collation
+> (`utf8mb4_0900_ai_ci`).
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS citext;
-
 CREATE TABLE tenants (
-  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  slug                CITEXT UNIQUE NOT NULL,        -- used in signup links & app login
-  name                TEXT NOT NULL,
-  is_house            BOOLEAN NOT NULL DEFAULT FALSE,
-  grace_working_days  INT NOT NULL DEFAULT 5 CHECK (grace_working_days BETWEEN 0 AND 30),
-  status              TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','SUSPENDED')),
-  created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+    id                  BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    slug                VARCHAR(64) NOT NULL UNIQUE,   -- used in signup links & app login
+    name                TEXT NOT NULL,
+    contact_person      TEXT,
+    contact_no          TEXT,
+    start_date          DATE NOT NULL,
+    end_date            DATE,
+    is_house            BOOLEAN NOT NULL DEFAULT FALSE,  -- house tenant (§2.3): platform admins live here
+    grace_working_days  INT NOT NULL DEFAULT 5 CHECK (grace_working_days BETWEEN 0 AND 30),
+    status              TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','INACTIVE')),
+    created_by          BIGINT,                        -- audit metadata; no FK (see DECISIONS.md)
+    updated_by          BIGINT,
+    created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
 CREATE TABLE products (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  code        CITEXT UNIQUE NOT NULL,        -- 'flowos'; used in API requests & CSV
-  name        TEXT NOT NULL,
-  key_prefix  TEXT NOT NULL,                 -- 'FL' → keys look like FL-XXXX-…
-  status      TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','RETIRED')),
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    id          BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    code        VARCHAR(64) NOT NULL UNIQUE,   -- 'flowos'; used in API requests & CSV
+    name        TEXT NOT NULL,
+    key_prefix  VARCHAR(8) NOT NULL,           -- 'FL' → keys look like FL-XXXX-…
+    status      TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','RETIRED')),
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
 CREATE TABLE tenant_products (                -- which products a tenant may distribute
-  tenant_id   UUID NOT NULL REFERENCES tenants(id),
-  product_id  UUID NOT NULL REFERENCES products(id),
-  PRIMARY KEY (tenant_id, product_id)
+    id          BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    tenant_id   BIGINT NOT NULL REFERENCES tenants(id),
+    product_id  BIGINT NOT NULL REFERENCES products(id),
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (tenant_id, product_id)
 );
 
-CREATE TABLE users (
-  id                       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id                UUID NOT NULL REFERENCES tenants(id),
-  role                     TEXT NOT NULL CHECK (role IN ('ADMIN','ALGO_USER')),
-  username                 CITEXT NOT NULL,
-  first_name               TEXT NOT NULL,
-  last_name                TEXT NOT NULL,
-  password_hash            TEXT NOT NULL,             -- argon2id
-  mobile                   TEXT NOT NULL,             -- E.164, e.g. +91XXXXXXXXXX
-  mobile_verified          BOOLEAN NOT NULL DEFAULT FALSE,
-  email                    CITEXT,                    -- optional
-  city                     TEXT,
-  state                    TEXT,
-  broker_client_code       TEXT,                      -- the user's ID at the broker (optional)
-  referral_code            TEXT,                      -- optional, free text V1
-  status                   TEXT NOT NULL DEFAULT 'PENDING_VERIFICATION'
-                           CHECK (status IN ('PENDING_VERIFICATION','ACTIVE','DEACTIVATED','BANNED')),
-  imported                 BOOLEAN NOT NULL DEFAULT FALSE,
-  import_batch_id          UUID,
-  created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (tenant_id, username),
-  UNIQUE (tenant_id, mobile)
+CREATE TABLE users (                          -- tenant-agnostic identity (owner's model); membership via tenant_users
+    id                  BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    username            VARCHAR(64) NOT NULL UNIQUE,  -- globally unique (owner's model — DECISIONS.md)
+    password_hash       TEXT NOT NULL,                -- argon2id
+    first_name          TEXT,
+    last_name           TEXT,
+    contact_no          VARCHAR(20),                  -- E.164, e.g. +91XXXXXXXXXX (API field name: mobile)
+    mobile_verified     BOOLEAN NOT NULL DEFAULT FALSE,
+    email               VARCHAR(191),                 -- optional
+    city                TEXT,
+    state               TEXT,
+    broker_client_code  TEXT,                         -- the user's ID at the broker (optional)
+    referral_code       TEXT,                         -- optional, free text V1
+    status              TEXT NOT NULL DEFAULT 'PENDING_VERIFICATION'
+                        CHECK (status IN ('PENDING_VERIFICATION','ACTIVE','DEACTIVATED','BANNED')),
+    token_version       INT NOT NULL DEFAULT 1,       -- bump to invalidate all sessions
+    imported            BOOLEAN NOT NULL DEFAULT FALSE,
+    import_batch_id     BIGINT,
+    created_by          BIGINT,                       -- audit metadata; no FK
+    updated_by          BIGINT,
+    created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE tenant_users (                   -- per-tenant membership and role
+    id          BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    tenant_id   BIGINT NOT NULL REFERENCES tenants(id),
+    user_id     BIGINT NOT NULL REFERENCES users(id),
+    role        TEXT NOT NULL CHECK (role IN ('SUPERADMIN','ADMIN','EDITOR','ALGO_USER')),
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (tenant_id, user_id)
 );
 
 CREATE TABLE licenses (
-  id                       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id                UUID NOT NULL REFERENCES tenants(id),
-  user_id                  UUID NOT NULL REFERENCES users(id),
-  product_id               UUID NOT NULL REFERENCES products(id),
-  license_key_hash         TEXT NOT NULL,             -- argon2id; key shown ONCE at creation
-  license_key_hint         TEXT NOT NULL,             -- last 4 chars, for support convos
-  status                   TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','DISABLED')),
-                                                      -- DISABLED = this product revoked without banning the user
-  subscription_valid_until DATE,                      -- denormalized from payments; NULL = never paid
-  entitlements             JSONB NOT NULL DEFAULT '{"max_activations":1,"tier":"RETAIL"}',
-  created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (user_id, product_id)
+    id                       BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    tenant_id                BIGINT NOT NULL REFERENCES tenants(id),
+    user_id                  BIGINT NOT NULL REFERENCES users(id),
+    product_id               BIGINT NOT NULL REFERENCES products(id),
+    license_key_hash         TEXT NOT NULL,            -- argon2id; key shown ONCE at creation
+    license_key_hint         VARCHAR(4) NOT NULL,      -- last 4 chars, for support convos
+    status                   TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','DISABLED')),
+                                                     -- DISABLED = this product revoked without banning the user
+    subscription_valid_until DATE,                     -- denormalized from payments; NULL = never paid
+    entitlements             JSON NOT NULL DEFAULT (CAST('{"max_activations":1,"tier":"RETAIL"}' AS JSON)),
+    created_at               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE (tenant_id, user_id, product_id)
 );
 
 CREATE TABLE payments (
-  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id           UUID NOT NULL REFERENCES tenants(id),
-  user_id             UUID NOT NULL REFERENCES users(id),      -- kept for query convenience
-  license_id          UUID NOT NULL REFERENCES licenses(id),   -- the product-subscription this payment extends
-  amount_minor_units  BIGINT NOT NULL CHECK (amount_minor_units >= 0),  -- paise; COMPLIMENTARY = 0
-  currency            TEXT NOT NULL DEFAULT 'INR',
-  method              TEXT NOT NULL CHECK (method IN ('MANUAL','COMPLIMENTARY','GATEWAY')),
-  gateway_payment_id  TEXT,                           -- NULL until gateway exists
-  plan                TEXT NOT NULL CHECK (plan IN ('MONTHLY','QUARTERLY','ANNUAL')),
-  paid_at             DATE NOT NULL,
-  valid_from          DATE NOT NULL,
-  valid_until         DATE NOT NULL,                  -- valid_from + plan duration
-  recorded_by         UUID NOT NULL REFERENCES users(id),  -- the admin who entered it
-  note                TEXT,
-  created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+    id                  BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    tenant_id           BIGINT NOT NULL REFERENCES tenants(id),
+    user_id             BIGINT NOT NULL REFERENCES users(id),   -- kept for query convenience
+    license_id          BIGINT NOT NULL REFERENCES licenses(id),-- the product-subscription this payment extends
+    amount_minor_units  BIGINT NOT NULL CHECK (amount_minor_units >= 0),  -- paise; COMPLIMENTARY = 0
+    currency            VARCHAR(3) NOT NULL DEFAULT 'INR',
+    method              TEXT NOT NULL CHECK (method IN ('MANUAL','COMPLIMENTARY','GATEWAY')),
+    gateway_payment_id  TEXT,                          -- NULL until gateway exists
+    plan                TEXT NOT NULL CHECK (plan IN ('MONTHLY','QUARTERLY','ANNUAL')),
+    paid_at             DATE NOT NULL,
+    valid_from          DATE NOT NULL,
+    valid_until         DATE NOT NULL,                 -- valid_from + plan duration
+    recorded_by         BIGINT NOT NULL,               -- the admin who entered it
+    note                TEXT,
+    created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 -- On INSERT (same transaction): licenses.subscription_valid_until =
 -- GREATEST(current value, valid_until). Never decreases automatically;
@@ -157,56 +195,60 @@ CREATE TABLE payments (
 -- payment row or a status change — both audited.
 
 CREATE TABLE otp_codes (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id     UUID NOT NULL REFERENCES users(id),
-  purpose     TEXT NOT NULL CHECK (purpose IN ('REGISTRATION','FIRST_LOGIN','PASSWORD_RESET')),
-  code_hash   TEXT NOT NULL,                          -- 6 digits, hashed; NEVER logged
-  expires_at  TIMESTAMPTZ NOT NULL,                   -- now() + 5 minutes
-  attempts    INT NOT NULL DEFAULT 0,                 -- max 5, then invalidated
-  consumed_at TIMESTAMPTZ
+    id          BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    user_id     BIGINT NOT NULL REFERENCES users(id),
+    purpose     TEXT NOT NULL CHECK (purpose IN ('REGISTRATION','FIRST_LOGIN','PASSWORD_RESET')),
+    code_hash   TEXT NOT NULL,                         -- 6 digits, hashed; NEVER logged
+    expires_at  DATETIME NOT NULL,                     -- supplied by app: now + 5 minutes
+    attempts    INT NOT NULL DEFAULT 0,                -- max 5, then invalidated
+    consumed_at DATETIME,
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE sessions (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id     UUID NOT NULL REFERENCES users(id),
-  audience    TEXT NOT NULL CHECK (audience IN ('DASHBOARD','APP')),
-  token_hash  TEXT NOT NULL,                          -- random 256-bit, sha256-stored
-  expires_at  TIMESTAMPTZ NOT NULL,                   -- dashboard 12h, app 30d
-  ip          TEXT,
-  user_agent  TEXT,
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    id          BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    user_id     BIGINT NOT NULL REFERENCES users(id),
+    audience    TEXT NOT NULL CHECK (audience IN ('DASHBOARD','APP')),
+    token_hash  VARCHAR(64) NOT NULL,                  -- random 256-bit, sha256-hex at rest
+    expires_at  DATETIME NOT NULL,                     -- dashboard 12h, app 30d
+    ip          VARCHAR(45),
+    user_agent  TEXT,
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE audit_log (
-  id              BIGSERIAL PRIMARY KEY,
-  tenant_id       UUID NOT NULL,
-  actor_user_id   UUID,                               -- NULL = system
-  action          TEXT NOT NULL,   -- e.g. USER_STATUS_CHANGED, PAYMENT_RECORDED, LICENSE_REGENERATED, USER_IMPORTED, ADMIN_LOGIN
-  subject_user_id UUID,
-  before          JSONB,
-  after           JSONB,
-  reason          TEXT,                               -- REQUIRED for status changes
-  at              TIMESTAMPTZ NOT NULL DEFAULT now()
+    id              BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    tenant_id       BIGINT NOT NULL,                   -- no FK: audit rows are append-only evidence
+    actor_user_id   BIGINT,                            -- NULL = system
+    action          TEXT NOT NULL,   -- e.g. USER_STATUS_CHANGED, PAYMENT_RECORDED, LICENSE_REGENERATED, USER_IMPORTED, ADMIN_LOGIN
+    subject_user_id BIGINT,
+    before          JSON,
+    after           JSON,
+    reason          TEXT,                              -- REQUIRED for status changes
+    at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 -- Every mutation of user status, subscription, license, or payment
 -- writes an audit row IN THE SAME TRANSACTION. No exceptions.
 
 CREATE TABLE import_batches (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id   UUID NOT NULL REFERENCES tenants(id),
-  filename    TEXT NOT NULL,
-  row_count   INT NOT NULL,
-  ok_count    INT NOT NULL,
-  error_count INT NOT NULL,
-  errors      JSONB,                                  -- [{row, reason}]
-  created_by  UUID NOT NULL REFERENCES users(id),
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    id          BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    tenant_id   BIGINT NOT NULL REFERENCES tenants(id),
+    filename    TEXT NOT NULL,
+    row_count   INT NOT NULL,
+    ok_count    INT NOT NULL,
+    error_count INT NOT NULL,
+    errors      JSON,                                 -- [{row, reason}]
+    created_by  BIGINT NOT NULL,
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 ```
 
 Seed data (migration): product `{code: 'flowos', name: 'FlowOS', key_prefix: 'FL'}`;
-house tenant `{slug: 'flowos', name: 'FlowOS Direct', is_house: true}` granted all
-products in tenant_products; one platform admin user under it
+house tenant `{id: 1, slug: 'flowos', name: 'FlowOS Direct', is_house: true,
+start_date: today}` (id 1 reserved for the house tenant, per the owner's
+`db_schemas.txt` convention) granted all products in tenant_products; one
+platform-admin user under it with `tenant_users.role = 'SUPERADMIN'`
 (credentials via env at first boot).
 
 ## 4. Access rule (the single source of truth)
@@ -232,7 +274,7 @@ Status mapping to the FlowOS contract:
 | All pass, in grace window | `valid` (+ `warning`) | "Subscription expired on {date} — {n} working day(s) of grace remain. Renew to avoid interruption." |
 | Grace exhausted / never paid | `paused` | "Subscription expired on {date} — renew to continue. Contact {tenant.name}." / "Account awaiting activation or payment. Contact {tenant.name}." |
 | user DEACTIVATED | `paused` | "Deactivated by {tenant.name}: {audit reason}" |
-| user BANNED or tenant SUSPENDED | `revoked` | "Access removed by {tenant.name}. Contact them to restore access." |
+| user BANNED or tenant INACTIVE | `revoked` | "Access removed by {tenant.name}. Contact them to restore access." |
 | license DISABLED (this product only) | `revoked` | "This product's license was removed by {tenant.name}." |
 | No such user / wrong key / no license for this product / product not granted to tenant | `not_found` | "License not recognised. Check your User ID and license key." |
 
@@ -367,7 +409,7 @@ verify, OTP cooldowns per §6.4 · TLS only (Caddy) · CORS locked to
 the dashboard origin · no card/bank data anywhere (out of PCI scope
 by design) · PII minimalism: collect only fields in §3 · OTP codes
 and license keys NEVER in logs · structured request logging with
-user/tenant IDs · nightly pg_dump + documented restore procedure ·
+user/tenant IDs · nightly mysqldump + documented restore procedure ·
 `.env` for secrets, never committed.
 
 ## 10. Milestones & acceptance (definition of done)
@@ -389,7 +431,7 @@ FIRST_LOGIN OTP flow; rate limits verified by test; deploy scripts
 (Caddyfile, systemd unit, backup cron) in `deploy/`.
 
 Global DoD: `go vet` + `go test ./...` clean; a `docker compose up`
-dev environment (postgres + hub + dashboard); README with runbook;
+dev environment (mysql + hub + dashboard); README with runbook;
 DECISIONS.md recording every choice this spec left open.
 
 ## 11. Out of scope for V1 (do not build)

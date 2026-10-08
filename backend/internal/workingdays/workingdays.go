@@ -20,3 +20,18 @@ func Add(d time.Time, n int) time.Time {
 	}
 	return d
 }
+
+// Count returns how many working days (Mon–Fri) fall strictly after a
+// up to and including b — the inverse of Add: Add(a, Count(a, b)) == b
+// for any working-day span b >= a. A span of zero or negative length
+// returns 0. Date-only inputs, same convention as Add.
+func Count(a, b time.Time) int {
+	n := 0
+	for cur := a.AddDate(0, 0, 1); !cur.After(b); cur = cur.AddDate(0, 0, 1) {
+		wd := cur.Weekday()
+		if wd != time.Saturday && wd != time.Sunday {
+			n++
+		}
+	}
+	return n
+}

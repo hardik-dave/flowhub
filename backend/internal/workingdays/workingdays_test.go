@@ -35,3 +35,46 @@ func TestAdd(t *testing.T) {
 		})
 	}
 }
+
+// Count cases: grace-remaining arithmetic for §4 warning strings.
+func TestCount(t *testing.T) {
+	cases := []struct {
+		name string
+		a, b time.Time
+		want int
+	}{
+		{"same day = 0", d(2026, time.September, 14), d(2026, time.September, 14), 0},
+		{"b before a = 0", d(2026, time.September, 17), d(2026, time.September, 14), 0},
+		{"Mon 14 → Thu 17 = 3 (spec §6.1 example numbers)", d(2026, time.September, 14), d(2026, time.September, 17), 3},
+		{"Fri 11 → Mon 14 skips weekend = 1", d(2026, time.September, 11), d(2026, time.September, 14), 1},
+		{"Fri 11 → Fri 18 = 5", d(2026, time.September, 11), d(2026, time.September, 18), 5},
+		{"Sat 12 → Fri 18 = 5 (weekend start)", d(2026, time.September, 12), d(2026, time.September, 18), 5},
+		{"weekend-only span = 0", d(2026, time.September, 12), d(2026, time.September, 13), 0},
+		{"month boundary: Wed Sep 30 → Mon Oct 5 = 3", d(2026, time.September, 30), d(2026, time.October, 5), 3},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := Count(c.a, c.b); got != c.want {
+				t.Fatalf("Count(%s, %s) = %d, want %d", c.a.Format("2006-01-02"), c.b.Format("2006-01-02"), got, c.want)
+			}
+		})
+	}
+}
+
+// Round-trip: Count is the inverse of Add on working-day spans.
+func TestAddCountRoundTrip(t *testing.T) {
+	for _, start := range []time.Time{
+		d(2026, time.September, 11),
+		d(2026, time.September, 12),
+		d(2026, time.September, 14),
+		d(2026, time.September, 30),
+	} {
+		for n := 0; n <= 10; n++ {
+			end := Add(start, n)
+			if got := Count(start, end); got != n {
+				t.Fatalf("Count(%s, Add(%s, %d)) = %d, want %d",
+					start.Format("2006-01-02"), start.Format("2006-01-02"), n, got, n)
+			}
+		}
+	}
+}

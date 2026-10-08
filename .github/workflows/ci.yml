@@ -1,11 +1,7 @@
-# CI for hub AS A STANDALONE REPOSITORY.
+# CI for the flowhub standalone repository (live as of 2026-10-08).
 #
-# INERT while hub lives inside the fintech-flowos integration repo — GitHub only
-# reads workflows from the repository root's .github/workflows/. This exists so
-# the folder arrives as its own repo with a working merge gate.
-#
-# Keep it in step with the hub half of the `go` job in the integration repo's
-# root ci.yml.
+# MySQL 8 service: DB-gated tests read HUB_TEST_DATABASE_URL and skip
+# cleanly when it is unset, so pure unit tests never depend on it.
 name: hub CI
 
 on:
@@ -19,11 +15,26 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: flowhub
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    env:
+      HUB_TEST_DATABASE_URL: root:root@tcp(127.0.0.1:3306)/flowhub?parseTime=true&loc=UTC&charset=utf8mb4
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version-file: backend/go.mod
 
       - name: gofmt (must be clean)
         run: |

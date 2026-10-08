@@ -17,7 +17,8 @@ contract. These rules govern HOW you execute it.
    on. Do not build it.
 4. **Do not "upgrade" the stack.** No ORM, no GraphQL, no
    microservices, no Kubernetes, no message queues, no per-tenant
-   databases. chi + pgx + golang-migrate + React/Vite as specified.
+   databases. chi + go-sql-driver/mysql + golang-migrate + React/Vite
+   as specified (MySQL per the 2026-10-08 amendment — DECISIONS.md).
 5. **Money is integer paise (`amount_minor_units BIGINT`)
    everywhere** — API, DB, tests. Rupee conversion happens only at
    the dashboard UI edge. If you type `float` near money, stop.

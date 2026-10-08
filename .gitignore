@@ -1,3 +1,20 @@
-session1.md
-session2.md
+# Local secrets — never committed (SPEC §9).
 .env
+
+# Session exports
+session*.md
+
+# Go build output
+backend/hubd
+backend/hubd.exe
+*.test
+
+# Dashboard
+dashboard/node_modules/
+dashboard/dist/
+
+# Editor / OS noise
+.vscode/
+.idea/
+*.log
+Thumbs.db
