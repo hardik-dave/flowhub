@@ -1,0 +1,13 @@
+[Unit]
+Description=FlowOS Hub
+After=network.target postgresql.service
+
+[Service]
+User=hub
+EnvironmentFile=/opt/hub/.env
+ExecStart=/opt/hub/hubd
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,4 @@
+hub.example.com {
+    reverse_proxy 127.0.0.1:8790
+    # Caddy handles TLS automatically. Lock CORS in the app, not here.
+}
