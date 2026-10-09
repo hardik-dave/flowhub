@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# FlowOS Hub nightly backup (SPEC §9: nightly mysqldump + documented
+# restore). Copy to /opt/hub/backup-mysql.sh, chmod 750, and point the
+# cron entry (see backup.cron.example) at it. Credentials come from the
+# same .env the service uses; nothing is written to the log.
+set -euo pipefail
+
+ENV_FILE="${ENV_FILE:-/opt/hub/.env}"
+BACKUP_DIR="${BACKUP_DIR:-/var/backups/flowhub}"
+RETENTION_DAYS="${RETENTION_DAYS:-14}"
+
+# shellcheck disable=SC1090
+set -a; . "$ENV_FILE"; set +a
+: "${MYSQL_DSN:?MYSQL_DSN missing from $ENV_FILE}"
+
+# Parse a go-sql-driver DSN: user:pass@tcp(host:port)/db?params
+userpass="${MYSQL_DSN%%@*}"
+hostpart="${MYSQL_DSN#*@tcp(}"
+hostport="${hostpart%%)*}"
+dbpart="${hostpart#*/}"
+db="${dbpart%%\?*}"
+db_user="${userpass%%:*}"
+db_pass="${userpass#*:}"
+db_host="${hostport%%:*}"
+db_port="${hostport##*:}"
+
+mkdir -p "$BACKUP_DIR"
+stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+out="$BACKUP_DIR/flowhub_${stamp}.sql.gz"
+
+MYSQL_PWD="$db_pass" mysqldump \
+  --host="$db_host" --port="$db_port" --user="$db_user" \
+  --single-transaction --quick --routines --triggers \
+  "$db" | gzip -9 > "$out"
+
+find "$BACKUP_DIR" -name 'flowhub_*.sql.gz' -type f -mtime "+$RETENTION_DAYS" -delete
+echo "backup written: $out"

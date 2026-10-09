@@ -14,3 +14,16 @@ services:
   #   build: ./backend  ·  env_file: .env  ·  depends_on: [db]
 volumes:
   hubdb:
+  dashboard:
+    image: node:20-alpine
+    working_dir: /app
+    volumes:
+      - ./dashboard:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+    command: sh -c "npm i --no-audit --no-fund && npm run dev -- --host 0.0.0.0"
+    ports:
+      - "5173:5173"
+    depends_on:
+      - db

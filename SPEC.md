@@ -84,7 +84,11 @@ that endpoint truthfully.
 > (Mon–Fri); `slug`, `mobile_verified`, `is_house`, product/PII
 > columns added because §4/§6/§7 cannot function without them.
 > `CITEXT` is replaced by the default case-insensitive collation
-> (`utf8mb4_0900_ai_ci`).
+> (`utf8mb4_0900_ai_ci`). MySQL specifics: the four `status` columns
+> are `VARCHAR(20)` (TEXT cannot carry a DEFAULT); column-level
+> `REFERENCES` below is realised in the migration as explicit
+> table-level FOREIGN KEY constraints (MySQL ignores inline
+> `REFERENCES`); `before`/`after` are backticked (reserved words).
 
 ```sql
 CREATE TABLE tenants (
@@ -97,7 +101,7 @@ CREATE TABLE tenants (
     end_date            DATE,
     is_house            BOOLEAN NOT NULL DEFAULT FALSE,  -- house tenant (§2.3): platform admins live here
     grace_working_days  INT NOT NULL DEFAULT 5 CHECK (grace_working_days BETWEEN 0 AND 30),
-    status              TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','INACTIVE')),
+    status              VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','INACTIVE')),
     created_by          BIGINT,                        -- audit metadata; no FK (see DECISIONS.md)
     updated_by          BIGINT,
     created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -109,7 +113,7 @@ CREATE TABLE products (
     code        VARCHAR(64) NOT NULL UNIQUE,   -- 'flowos'; used in API requests & CSV
     name        TEXT NOT NULL,
     key_prefix  VARCHAR(8) NOT NULL,           -- 'FL' → keys look like FL-XXXX-…
-    status      TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','RETIRED')),
+    status      VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','RETIRED')),
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
@@ -135,7 +139,7 @@ CREATE TABLE users (                          -- tenant-agnostic identity (owner
     state               TEXT,
     broker_client_code  TEXT,                         -- the user's ID at the broker (optional)
     referral_code       TEXT,                         -- optional, free text V1
-    status              TEXT NOT NULL DEFAULT 'PENDING_VERIFICATION'
+    status              VARCHAR(20) NOT NULL DEFAULT 'PENDING_VERIFICATION'
                         CHECK (status IN ('PENDING_VERIFICATION','ACTIVE','DEACTIVATED','BANNED')),
     token_version       INT NOT NULL DEFAULT 1,       -- bump to invalidate all sessions
     imported            BOOLEAN NOT NULL DEFAULT FALSE,
@@ -162,7 +166,7 @@ CREATE TABLE licenses (
     product_id               BIGINT NOT NULL REFERENCES products(id),
     license_key_hash         TEXT NOT NULL,            -- argon2id; key shown ONCE at creation
     license_key_hint         VARCHAR(4) NOT NULL,      -- last 4 chars, for support convos
-    status                   TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','DISABLED')),
+    status                   VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','DISABLED')),
                                                      -- DISABLED = this product revoked without banning the user
     subscription_valid_until DATE,                     -- denormalized from payments; NULL = never paid
     entitlements             JSON NOT NULL DEFAULT (CAST('{"max_activations":1,"tier":"RETAIL"}' AS JSON)),

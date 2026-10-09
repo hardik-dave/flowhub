@@ -43,3 +43,27 @@ Dev quickstart: copy `.env.example` → `.env` (set `MYSQL_DSN`) →
 create the database (`CREATE DATABASE flowhub`) → `go run ./cmd/hubd`
 (applies migrations at startup). Alternative for other machines:
 `docker compose up -d db` (MySQL 8 on host port 3307).
+
+## Runbook
+
+- Build / test: `cd backend && go vet ./... && go test ./... -count=1`.
+  DB-backed tests run when `HUB_TEST_DATABASE_URL` is set.
+- Launch: run `hubd` with CWD = `backend/` so `migrations/` resolves;
+  it applies migrations, then bootstraps the platform admin from
+  `PLATFORM_ADMIN_*` (idempotent) and listens on `HUB_LISTEN`.
+- Deploy: `deploy/Caddyfile.example` (TLS + reverse proxy),
+  `deploy/hubd.service.example` (systemd unit, `EnvironmentFile` =
+  `.env`).
+- Backups: `deploy/backup-mysql.sh.example` does a nightly
+  `mysqldump` (gzip, 14-day retention); `deploy/backup.cron.example`
+  schedules it. Restore with
+  `gunzip -c flowhub_<stamp>.sql.gz | mysql -u root -p flowhub`.
+- Secrets: `.env` only, never committed; OTP codes and license keys
+  are never logged.
+
+## Dashboard (React + Vite)
+
+Dev: `cd dashboard && npm i && npm run dev` → http://localhost:5173.
+Build: `cd dashboard && npm run build && npm run test`.
+API proxy: `/api` → `http://127.0.0.1:8790` (vite.config.ts).
+Docker: `docker compose up -d db dashboard hubd` (hubd builds from ./backend).

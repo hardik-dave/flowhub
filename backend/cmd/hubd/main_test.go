@@ -9,15 +9,33 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/flowos/hub/internal/auth"
 	"github.com/flowos/hub/internal/config"
+	"github.com/flowos/hub/internal/dashboard"
 	"github.com/flowos/hub/internal/httpx"
+	"github.com/flowos/hub/internal/user"
+	"github.com/flowos/hub/internal/verify"
 )
+
+// testHandlers wires handlers over a nil store — enough to register
+// routes; the surface tests never invoke them with a nil store.
+func testHandlers() *handlers {
+	ah := auth.NewHandler(nil, auth.NewSender(nil), time.Now)
+	vs := verify.NewService(nil, time.Now)
+	return &handlers{
+		verify:   verify.NewHandler(vs),
+		auth:     ah,
+		user:     user.New(nil, ah.OTP(), vs, time.Now),
+		dash:     dashboard.New(nil, time.Now),
+		dashAuth: func(next http.Handler) http.Handler { return next },
+	}
+}
 
 // TestRouteSurface locks the API surface: every SPEC §6/§7 route
 // (22 business endpoints + healthz), nothing more (AGENTS.md rule 3).
 func TestRouteSurface(t *testing.T) {
 	cfg := &config.Config{DashboardOrigin: "http://localhost:5173"}
-	r := newRouter(cfg, httpx.NewRateLimiter(10, time.Minute))
+	r := newRouter(cfg, httpx.NewRateLimiter(10, time.Minute), testHandlers())
 
 	want := []string{
 		"GET /healthz",
@@ -82,7 +100,7 @@ func collectRoutes(routes chi.Routes, prefix string, out map[string]bool) {
 
 func TestHealthz(t *testing.T) {
 	cfg := &config.Config{DashboardOrigin: "http://localhost:5173"}
-	r := newRouter(cfg, httpx.NewRateLimiter(10, time.Minute))
+	r := newRouter(cfg, httpx.NewRateLimiter(10, time.Minute), testHandlers())
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
 	if rec.Code != http.StatusOK || rec.Body.String() != "ok" {

@@ -156,3 +156,162 @@ Format: date · decision · one line of why. The builder appends here
   /dash/tenants/{id}/status which SPEC §7 line 378 does list.
 - 2026-10-08 · argon2id dependency fetched with the rest; password
   hashing code arrives with M-A (CS-3), not before.
+- 2026-10-08 · MySQL DDL fixes found on first apply (8.0.46):
+  (a) TEXT columns cannot have a DEFAULT, so the four `status` columns
+  (tenants, products, users, licenses) are VARCHAR(20) in SPEC §3 and
+  the migration; (b) column-level `REFERENCES` is parsed-but-ignored
+  by MySQL, so the migration emits explicit table-level FOREIGN KEY
+  constraints (13 total) — audit_log.tenant_id, created_by/updated_by
+  and import_batch_id stay FK-free by design; (c) `before`/`after` are
+  reserved words and are backticked; (d) JSON `entitlements` DEFAULT
+  (CAST(... AS JSON)) is valid on 8.0.13+ and verified.
+- 2026-10-08 · 0001_init applied to the local `flowhub` DB:
+  schema_migrations version=1 dirty=0, 11 tables + schema_migrations,
+  house tenant id 1 (slug flowos, is_house), product flowos (FL)
+  granted in tenant_products; 13 FKs, 11 CHECK constraints.
+- 2026-10-08 · DB-gated migration integration test (skips without
+  HUB_TEST_DATABASE_URL, runs in CI) asserts Up() applies cleanly,
+  is idempotent (ErrNoChange) and seeds house tenant + product + grant.
+- 2026-10-08 · M-A (CS-3): one `internal/store` repository layer
+  wrapping `*sql.DB`; a `DBTX` interface (`*sql.DB`/`*sql.Tx`) lets the
+  same methods compose inside `InTx`. Every tenant-data query takes
+  tenant_id; `InsertAudit` is the single writer of audit_log and is
+  always called in the caller's mutation transaction (rule 7).
+- 2026-10-08 · argon2id via github.com/alexedwards/argon2id, fixed
+  params m=65536 (64MiB), t=3, p=2, salt 16, key 32 — used for
+  passwords AND license keys AND OTP codes (rule: if you type float
+  near money stop; same seriousness for secrets). Params fixed (not
+  runtime.NumCPU) so hashes are portable.
+- 2026-10-08 · Sessions: 256-bit random token, base64url to the client,
+  sha256-hex (64 chars) at rest. Sessions are NOT tenant-bound (SPEC
+  §3), so `Principal{UserID, Audience, TokenHash}` and tenant scope is
+  resolved per request from `tenant_users`. DASHBOARD 12h, APP 30d.
+- 2026-10-08 · Endpoint status ladder implemented as decided: register
+  404 unknown tenant / 400 unknown-or-ungranted product / 409 username
+  taken; username `^[A-Za-z0-9._-]{3,64}$`, password ≥8, mobile E.164
+  `^\+[1-9][0-9]{7,14}$`; login 401 masked / 409 {otp_required:true}
+  when mobile unverified / 403 §6.1 reason when access fails / 200
+  {session_token, user{id,username,first_name,role}, verify:<§6.1 body>}.
+  A freshly registered user is 403 "awaiting activation or payment"
+  until a payment sets validity — truthful per §4, not a bug.
+- 2026-10-08 · §6.2 login must return the §6.1 body, so the verify
+  service landed in M-A (not M-B). `CheckLicense` compares the presented
+  key; `CheckAccount` skips the key (password proved identity).
+  `entitlements` is null when no license; subscription dates are
+  `2006-01-02`; the pure §4 rule stays in rule.go.
+- 2026-10-08 · OTP: 6 digits, argon2id-hashed, 5-min expiry, 5 attempts,
+  60s resend cooldown → 429. Purposes REGISTRATION and FIRST_LOGIN are
+  wired (PASSWORD_RESET deferred — no reset UI in V1). Verification
+  consumes the code, flips mobile_verified (+ PENDING→ACTIVE) and writes
+  the MOBILE_VERIFIED audit row in ONE tx.
+- 2026-10-08 · ConsoleSender (dev) writes the SMS body to stdout
+  DIRECTLY, not through slog — an explicit, documented exception to
+  AGENTS rule 8 (SPEC §6.4 mandates a console sink); production always
+  uses MSG91Sender. MSG91Sender posts the Flow API with the DLT
+  template variable assumed to be named "code" (TRAI approval pending).
+- 2026-10-08 · First-boot platform admin: house tenant id 1, role
+  SUPERADMIN, mobile_verified=true, ACTIVE, audited
+  PLATFORM_ADMIN_BOOTSTRAPPED; idempotent (no-op if the username
+  exists); driven by PLATFORM_ADMIN_* env, no-op when unset.
+- 2026-10-08 · Dashboard login allows roles SUPERADMIN/ADMIN/EDITOR
+  (ALGO_USER → 403); creates a DASHBOARD session and an ADMIN_LOGIN
+  audit row; logout requires a live DASHBOARD bearer and deletes the
+  session (no other session revocations in M-A; token_version is the
+  later lever).
+- 2026-10-08 · `httpx.DecodeJSON` added: 1 MiB body cap, lenient on
+  unknown fields (forward-compatible clients), 400 with a friendly
+  message on malformed JSON. Audit actions so far: USER_REGISTERED,
+  MOBILE_VERIFIED, ADMIN_LOGIN, PLATFORM_ADMIN_BOOTSTRAPPED.
+- 2026-10-08 · M-A acceptance is a DB-gated test in cmd/hubd
+  (register→OTP→login ladder + audit assertions) plus unit tests for
+  argon2id/session/OTP. Verified locally against MySQL 8.0.46:
+  `go vet ./...` clean, `go test ./... -count=1` all ok.
+- 2026-10-09 · CS-4/M-C: dashboard tenancy follows PashuTrack — a
+  session is NOT tenant-bound, so `auth.RequireDashboard` resolves
+  `Scope{UserID,TenantID,Role,IsPlatformAdmin}` from the caller's first
+  `tenant_users` row per request (V1 = one tenant per person). ALGO_USER
+  is rejected. This middleware also sets `Principal` (so DashLogout's
+  TokenHash lookup still works) and rejects non-ACTIVE users.
+- 2026-10-09 · Platform admins (house-tenant SUPERADMIN) may target
+  another tenant with the `X-Tenant-ID` header — the single documented
+  cross-tenant path (SPEC §7 act-as). Non-platform callers get 403;
+  the target tenant is recorded on the audit row. `Access-Control-Allow-
+  Headers` now includes `X-Tenant-ID`.
+- 2026-10-09 · CS-4 ships 13 of the 14 remaining §7 endpoints. POST
+  /dash/payments stays 501 (deferred). Consequence, recorded here: with
+  no payment writer, nothing sets `licenses.subscription_valid_until`,
+  so admin-created/granted licenses verify as `paused` ("awaiting
+  activation or payment") until a payment lands or the date is set
+  manually. `POST /dash/users` and license grants create licenses with
+  status ACTIVE but no validity window, which is truthful per §4.
+- 2026-10-09 · Secret handling: `POST /dash/users` and license
+  grant/regenerate return the one-time password / license key in the
+  201/200 body only (never logged, only argon2id hashes + last-4 hint
+  stored). `POST /dash/tenants` creates tenant + product grants + an
+  ADMIN user in one tx; the admin password is returned only when the
+  caller did not supply one. Audit actions added: USER_CREATED,
+  USER_STATUS_CHANGED, LICENSE_GRANTED, LICENSE_STATUS_CHANGED,
+  LICENSE_REGENERATED, TENANT_UPDATED, TENANT_CREATED,
+  TENANT_STATUS_CHANGED. Every status/license/tenant mutation writes its
+  audit row in the same tx; user DEACTIVATED/BANNED bumps token_version.
+- 2026-10-09 · Validation: slug `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`,
+  reusing username/E.164 rules from register; grace_working_days 0–30;
+  tenant statuses ACTIVE/INACTIVE, license ACTIVE/DISABLED, user
+  ACTIVE/DEACTIVATED/BANNED. CS-4 acceptance is a DB-gated test in
+  cmd/hubd (`TestDashboardTenantLifecycle`) covering onboarding, the
+  user lifecycle, audit-row-per-mutation, token_version bump, and
+  cross-tenant confinement. Verified locally: `go vet ./...` clean,
+  `go test ./... -count=1` all ok.
+- 2026-10-09 · CS-5/M-D CSV import (SPEC §8): multipart `file` (≤5 MiB,
+  ≤5000 data rows). Header row required with `username` and `mobile`;
+  other columns matched by name, `product_code` defaults to `flowos`.
+  Dedup on (tenant, username) — globally unique in schema — and
+  (tenant, mobile) via an in-memory set plus a tenant-scoped query.
+  Imported users are `imported=true`, `mobile_verified=false`,
+  `PENDING_VERIFICATION`, so first app login drives FIRST_LOGIN OTP.
+  Each successful row gets its own password + license key (returned
+  once), an ALGO_USER membership, an ACTIVE license, an optional MANUAL
+  payment (amount 0, note "imported") and a USER_IMPORTED audit row;
+  the whole batch runs in one tx, and `import_batches` records counts +
+  the per-row `{row, reason}` list. `row` is the 1-based data-row
+  ordinal (header excluded) — a spreadsheet line number would be
+  off-by-one/ambiguous with quoted newlines.
+- 2026-10-09 · If `plan`/`paid_at`/`valid_from` are present they must
+  all be present and valid; `valid_until` = valid_from + (MONTHLY 1 /
+  QUARTERLY 3 / ANNUAL 12) calendar months, and the license's
+  subscription_valid_until is set in the same tx. Rows missing the
+  trio simply have no payment (license stays paused until §7 payments).
+- 2026-10-09 · M-D deploy artifacts: added
+  `deploy/backup-mysql.sh.example` + `deploy/backup.cron.example`
+  (Caddyfile and systemd unit already existed) and a README Runbook
+  (build/test, launch, deploy, backup/restore, secrets). M-D acceptance
+  tests in cmd/hubd: `TestCSVImportAndFirstLoginOTP` (import with mixed
+  per-row results → FIRST_LOGIN OTP → valid login) and
+  `TestLoginRateLimit` (the §9 per-IP login ceiling trips 429).
+  Verified locally: `go vet ./...` clean, `go test ./... -count=1` all
+  ok.
+- 2026-10-09 · Dashboard scaffold (CS-D): Vite + React + TS, React Router,
+  TanStack Query, Tailwind CSS, Vitest + RTL. Money conversion at the
+  UI edge (`lib/money.ts`) — integer paise only on the wire. Auth token +
+  act-as tenant (`X-Tenant-ID`) stored in localStorage; platform admins
+  can act on another tenant.
+- 2026-10-09 · GET /dash/users has no "payment state" filter in the
+  backend (SPEC lists filters: status, payment state). The dashboard
+  shows a derived badge per user licenses/validity but does not send a
+  server-side payment-state filter (deferred to a later change-set) —
+  recorded as a documented gap.
+- 2026-10-09 · Dashboard pages cover all §7 flows plus an API tools
+  page (/app/*) for end-to-end system checks; payments remain read-only
+  (POST /dash/payments 501). One-time secrets (passwords/license keys)
+  are rendered in modals/tables at creation time only and never logged.
+- 2026-10-09 · Frontend tests: 22 passing (money utils, API client, UI
+  components, LoginPage). Docker compose extended with a `dashboard`
+  service (Vite dev server, npm i on start).
+- 2026-10-09 · Blank-screen fix: `buildUserView` now initializes
+  `Licenses` non-nil so a license-less user serializes `licenses: []`
+  instead of `null` (matching the other list handlers and the TS type);
+  the dashboard also guards null lists, and an `ErrorBoundary` now shows
+  a readable message instead of a white screen if a render ever throws.
+  `ErrorText.children` made optional and `skipLibCheck` enabled in the
+  dashboard tsconfig so `npm run typecheck` is green.
+
