@@ -39,7 +39,7 @@ export function Layout() {
     <div className="flex min-h-screen">
       <aside className="flex w-60 flex-col border-r border-slate-200 bg-white">
         <div className="px-4 py-4">
-          <p className="text-lg font-bold text-indigo-700">FlowOS Hub</p>
+          <p className="text-lg font-bold text-indigo-700">FlowHub</p>
           <p className="text-xs text-slate-500">Licensing console</p>
         </div>
         <nav className="flex-1 space-y-1 px-2">

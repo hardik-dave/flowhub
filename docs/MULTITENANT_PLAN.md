@@ -1,6 +1,6 @@
-# Multi-Tenant Management System — FlowOS Hub
+# Multi-Tenant Management System — FlowHub
 
-**Scope:** Implement the tenant-scoped multi-tenant management system for FlowOS Hub (licensing, user-management, subscription backend) per `SPEC.md`.
+**Scope:** Implement the tenant-scoped multi-tenant management system for FlowHub (licensing, user-management, subscription backend) per `SPEC.md`.
 
 **Reference:** PashuTrack API (`pashutrackapi`) — its tenant-scoping pattern is the template; where Hub's SPEC differs, Hub's SPEC wins.
 
@@ -17,7 +17,7 @@
 
 ## 2. Hub vs PashuTrack — Deliberate Differences
 
-| Aspect | PashuTrack | FlowOS Hub (SPEC) |
+| Aspect | PashuTrack | FlowHub (SPEC) |
 |--------|-----------|---------------------|
 | Tenant ID | `BIGSERIAL` (int64) | `UUID` |
 | Auth | JWT (24h) | Random 256-bit session tokens, sha256-hashed at rest (12h DASHBOARD / 30d APP) |

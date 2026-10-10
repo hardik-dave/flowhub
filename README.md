@@ -1,4 +1,4 @@
-# FlowOS Hub
+# FlowHub
 
 > **SCOPE NOTE SUPERSEDED (2026-10-08):** the Aug-2026 six-area scope
 > below is not the build target — SPEC.md §1–§10 (with §11's

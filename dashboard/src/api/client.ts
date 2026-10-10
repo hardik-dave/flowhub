@@ -5,6 +5,7 @@ import { getActAsTenant, getToken } from '../auth/storage'
 import type {
   AppLoginResponse,
   AuditListResponse,
+  CreateTenantInput,
   CreateTenantResponse,
   CreateUserResponse,
   GrantLicenseResponse,
@@ -135,7 +136,7 @@ export const dash = {
   listTenants(): Promise<{ tenants: TenantView[] }> {
     return request('/dash/tenants', { noActAs: true })
   },
-  createTenant(body: Record<string, unknown>): Promise<CreateTenantResponse> {
+  createTenant(body: CreateTenantInput): Promise<CreateTenantResponse> {
     return request('/dash/tenants', { method: 'POST', body, noActAs: true })
   },
   updateTenantStatus(id: number, status: string, reason: string): Promise<{ ok: boolean }> {

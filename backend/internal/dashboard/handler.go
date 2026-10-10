@@ -192,6 +192,10 @@ type tenantView struct {
 	ContactNo        string  `json:"contact_no"`
 	StartDate        string  `json:"start_date"`
 	EndDate          *string `json:"end_date"`
+	// Products lists the product codes this tenant may distribute. Populated
+	// only on GET /dash/tenant (the acting tenant's own view); omitted
+	// elsewhere and when empty.
+	Products []string `json:"products,omitempty"`
 }
 
 func tenantViewOf(t *store.Tenant) tenantView {
@@ -715,7 +719,14 @@ func (h *Handler) GetTenant(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "Could not load the workspace.")
 		return
 	}
-	httpx.JSON(w, http.StatusOK, tenantViewOf(tenant))
+	view := tenantViewOf(tenant)
+	codes, err := h.store.GrantedProductCodes(r.Context(), sc.TenantID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "Could not load the workspace.")
+		return
+	}
+	view.Products = codes
+	httpx.JSON(w, http.StatusOK, view)
 }
 
 type updateTenantRequest struct {

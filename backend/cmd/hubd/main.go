@@ -1,4 +1,4 @@
-// hubd — FlowOS Hub server.
+// hubd — FlowHub server.
 //
 // Boot order: config → open pool → apply migrations → bootstrap the
 // first-boot platform admin → router → listen. A route that is not yet

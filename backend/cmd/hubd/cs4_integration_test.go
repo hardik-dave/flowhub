@@ -116,7 +116,7 @@ func TestDashboardTenantLifecycle(t *testing.T) {
 	adminUsername := fmt.Sprintf("tsadm_%d", time.Now().UnixNano())
 	rec := e.doJSON(t, http.MethodPost, "/api/v1/dash/tenants", map[string]any{
 		"slug": slug, "name": "Test Tenant", "contact_person": "Owner", "contact_no": "+919876511001",
-		"start_date": "2026-01-01", "grace_working_days": 7, "products": []string{"flowos"},
+		"start_date": "2026-01-01", "grace_working_days": 7, "products": []string{"flowos", "optionalyzer"},
 		"admin": map[string]any{
 			"username": adminUsername, "password": "tenantpass123", "first_name": "T",
 			"last_name": "Admin", "mobile": "+919876511002",
@@ -264,12 +264,16 @@ func TestDashboardTenantLifecycle(t *testing.T) {
 		t.Fatalf("get tenant = %d %s", rec.Code, rec.Body)
 	}
 	var tvw struct {
-		Slug             string `json:"slug"`
-		GraceWorkingDays int    `json:"grace_working_days"`
+		Slug             string   `json:"slug"`
+		GraceWorkingDays int      `json:"grace_working_days"`
+		Products         []string `json:"products"`
 	}
 	decode(t, rec, &tvw)
 	if tvw.Slug != slug || tvw.GraceWorkingDays != 7 {
 		t.Fatalf("tenant view = %s", rec.Body)
+	}
+	if len(tvw.Products) != 2 || tvw.Products[0] != "flowos" || tvw.Products[1] != "optionalyzer" {
+		t.Fatalf("tenant products = %v, want [flowos optionalyzer]", tvw.Products)
 	}
 	rec = e.doJSON(t, http.MethodPatch, "/api/v1/dash/tenant",
 		map[string]any{"grace_working_days": 3}, tenantToken, "")

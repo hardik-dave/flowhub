@@ -1,4 +1,4 @@
-# FlowOS Hub — install to /etc/cron.d/flowhub (root) or the hub user's
+# FlowHub — install to /etc/cron.d/flowhub (root) or the hub user's
 # crontab. Nightly at 02:15 UTC; logs to journald via logger.
 # Restore (documented in README): gunzip -c flowhub_<stamp>.sql.gz | mysql -u root -p flowhub
 15 2 * * * hub ENV_FILE=/opt/hub/.env /opt/hub/backup-mysql.sh 2>&1 | logger -t flowhub-backup

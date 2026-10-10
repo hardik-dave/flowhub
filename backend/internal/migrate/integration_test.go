@@ -66,14 +66,23 @@ func TestUpAppliesSchemaAndSeeds(t *testing.T) {
 		t.Errorf("house tenant seed missing (id=1, slug=flowos, is_house=TRUE): count=%d", house)
 	}
 
-	var product int
-	if err := db.QueryRow(
-		"SELECT COUNT(*) FROM products WHERE code = 'flowos' AND key_prefix = 'FL'",
-	).Scan(&product); err != nil {
-		t.Fatal(err)
-	}
-	if product != 1 {
-		t.Errorf("product seed missing (flowos/FL): count=%d", product)
+	for code, prefix := range map[string]string{
+		"flowos":       "FL",
+		"optionalyzer": "OP",
+		"dhansanketai": "DS",
+		"pashutrack":   "PT",
+		"teleflow":     "TF",
+	} {
+		var product int
+		if err := db.QueryRow(
+			"SELECT COUNT(*) FROM products WHERE code = ? AND key_prefix = ? AND status = 'ACTIVE'",
+			code, prefix,
+		).Scan(&product); err != nil {
+			t.Fatal(err)
+		}
+		if product != 1 {
+			t.Errorf("product seed missing (%s/%s): count=%d", code, prefix, product)
+		}
 	}
 
 	var grant int

@@ -1,6 +1,6 @@
-# AGENTS.md — rules for whoever (or whatever) builds FlowOS Hub
+# AGENTS.md — rules for whoever (or whatever) builds FlowHub
 
-You are building from FLOWOS_HUB_SPEC.md. That document is the
+You are building from SPEC.md. That document is the
 contract. These rules govern HOW you execute it.
 
 1. **The §6.1 /app/verify response is consumed by a shipped desktop

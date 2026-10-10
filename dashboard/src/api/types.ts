@@ -70,6 +70,8 @@ export interface TenantView {
   contact_no: string
   start_date: string
   end_date: string | null
+  /** Granted product codes; only present on GET /dash/tenant. */
+  products?: string[]
 }
 
 export interface UsersListResponse {
@@ -138,6 +140,27 @@ export interface CreateTenantResponse {
   admin_user_id: number
   admin_username: string
   password?: string
+}
+
+export interface CreateTenantAdminInput {
+  username: string
+  password?: string
+  first_name?: string
+  last_name?: string
+  mobile: string
+  email?: string
+}
+
+export interface CreateTenantInput {
+  slug: string
+  name: string
+  contact_person?: string
+  contact_no?: string
+  start_date: string
+  end_date?: string
+  grace_working_days?: number
+  products: string[]
+  admin: CreateTenantAdminInput
 }
 
 export interface UsersQuery {

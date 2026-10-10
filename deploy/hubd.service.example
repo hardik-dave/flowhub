@@ -1,5 +1,5 @@
 [Unit]
-Description=FlowOS Hub
+Description=FlowHub
 After=network.target mysql.service
 
 [Service]

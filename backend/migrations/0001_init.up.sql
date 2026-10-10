@@ -1,4 +1,4 @@
--- FlowOS Hub initial schema (SPEC.md §3, MySQL 8.0 per the 2026-10-08 amendment).
+-- FlowHub initial schema (SPEC.md §3, MySQL 8.0 per the 2026-10-08 amendment).
 -- Every query is tenant-scoped; money is integer paise; status changes are audited.
 
 CREATE TABLE tenants (

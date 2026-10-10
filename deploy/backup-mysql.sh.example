@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# FlowOS Hub nightly backup (SPEC §9: nightly mysqldump + documented
+# FlowHub nightly backup (SPEC §9: nightly mysqldump + documented
 # restore). Copy to /opt/hub/backup-mysql.sh, chmod 750, and point the
 # cron entry (see backup.cron.example) at it. Credentials come from the
 # same .env the service uses; nothing is written to the log.

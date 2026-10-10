@@ -1,7 +1,7 @@
-# FlowOS Hub — Build Specification v1.1 (multi-product)
+# FlowHub — Build Specification v1.1 (multi-product)
 
 **What this is:** the complete, self-contained specification for the
-FlowOS Hub — the tenant-scoped licensing, user-management, and
+FlowHub — the tenant-scoped licensing, user-management, and
 subscription backend for the company's products. FlowOS (the desktop
 trading platform) is the first product; the licensing model is
 product-dimensional from day one (v1.1). **Identity is

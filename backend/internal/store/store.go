@@ -245,6 +245,27 @@ func (s *Store) ProductGrantedToTenant(ctx context.Context, tenantID, productID 
 	return true, nil
 }
 
+// GrantedProductCodes returns the codes of the products a tenant may
+// distribute, ordered by code. Tenant-scoped: caller passes the tenant id.
+func (s *Store) GrantedProductCodes(ctx context.Context, tenantID int64) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT p.code FROM tenant_products tp JOIN products p ON p.id = tp.product_id "+
+			"WHERE tp.tenant_id = ? ORDER BY p.code", tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	codes := make([]string, 0)
+	for rows.Next() {
+		var code string
+		if err := rows.Scan(&code); err != nil {
+			return nil, err
+		}
+		codes = append(codes, code)
+	}
+	return codes, rows.Err()
+}
+
 const userCols = "id, username, password_hash, first_name, last_name, contact_no, mobile_verified, email, city, state, status, token_version"
 
 func (s *Store) UserByUsername(ctx context.Context, username string) (*User, error) {

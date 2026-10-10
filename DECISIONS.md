@@ -314,4 +314,31 @@ Format: date · decision · one line of why. The builder appends here
   a readable message instead of a white screen if a render ever throws.
   `ErrorText.children` made optional and `skipLibCheck` enabled in the
   dashboard tsconfig so `npm run typecheck` is green.
+- 2026-10-09 · Product catalogue (Part 1 of the dashboard-actions work).
+  `products` is seeded, never user-created (SPEC §3 seed data): migration
+  `0002_products` idempotently upserts `flowos/FlowOS/FL`,
+  `optionalyzer/Optionalyzer/OP`, `dhansanketai/DhanSanket AI/DS`,
+  `pashutrack/PashuTrack/PT`, `teleflow/TeleFlow/TF`. The display names
+  and key prefixes for the four non-flowos products were supplied by the
+  owner (not in SPEC). `GET /dash/tenant` gains an additive
+  `products []string` field (omitted when empty via `omitempty`, so the
+  nil-slice→`null` trap from the blank-screen fix cannot recur) listing
+  the acting tenant's granted product codes — this is what the dashboard
+  grant-license picker filters on. Backed by a new tenant-scoped store
+  method `GrantedProductCodes`.
+- 2026-10-09 · Dashboard actions (Part 2). The dashboard's disabled
+  controls are now wired to the §7 endpoints: user status change (reason
+  required), license grant (picker limited to the acting tenant's granted
+  `products` minus those the user already holds), license
+  disable/enable, license-key regenerate (confirm first; new key shown
+  once), and the user audit trail (rendered from `GET /dash/users/{id}`'s
+  existing `audit[]`, no extra call). Platform admins can create tenants
+  (product multi-select from the five seeded codes, default `flowos`) and
+  change tenant status. One-time secrets (admin password, license keys)
+  render only in a modal at creation time. `POST /dash/payments` still
+  501, so the payments card stays a read-only placeholder. The
+  grant-license picker reads a new `GET /dash/tenant` query; shared
+  `StatusModal`/`OneTimeSecret` components avoid triplicating the
+  status+reason and one-time-secret UI. Frontend tests: 35 passing (8
+  files).
 
