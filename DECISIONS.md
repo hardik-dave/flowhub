@@ -399,3 +399,36 @@ Format: date · decision · one line of why. The builder appends here
   always configures MSG91 per §6.4) can never echo or skip the cooldown.
   Additive response field only — §6.1 `/app/verify` is untouched (AGENTS
   rule 1).
+
+- 2026-10-10 · Dev tenant cleanup. The local DB had accumulated throwaway
+  tenants from integration runs; there is no delete-tenant endpoint (SPEC
+  §7 lists only create/list/status), so added `cmd/purge-tenants`: a
+  dry-run-by-default local tool that deletes every tenant except a
+  `-keep` allowlist (default `1,11,12`), never the house tenant
+  (`is_house=1`), in FK-safe order, with an optional `-backup <path>`
+  JSON snapshot. It refuses to delete a user that still has membership,
+  license, or payment rows in any tenant. Root cause of the buildup:
+  `deleteTenant` (test helper) deleted `licenses` before `payments`, so
+  the license delete hit the payments FK, failed silently, and the tenant
+  delete then failed — fixed the ordering and made the helper surface
+  errors. Keeping tenants 1 (`flowos`, platform admin's home) and 11/12
+  (the only real ones). This is local maintenance tooling, not product
+  scope.
+
+- 2026-10-10 · Platform-admin cross-tenant user list. SPEC §7's
+  `GET /dash/users` is tenant-scoped, so a platform admin could only see
+  one tenant at a time via the act-as header; §7 gave no "all tenants"
+  read. Added `GET /api/v1/dash/all-users`: the documented platform-admin
+  exception to per-tenant scoping (AGENTS rule 6), gated on
+  `sc.IsPlatformAdmin` exactly like `GET /dash/tenants` (403
+  otherwise), ignoring act-as. It returns one row per `(tenant, user)`
+  membership (users ⋈ tenant_users ⋈ tenants), each carrying
+  `tenant_id`/`tenant_slug`/`tenant_name`; filters by tenant/status/
+  product/q with the same `pageSize` pagination. Read-only — the
+  dashboard page only offers View, which switches the act-as tenant to
+  that row's tenant then opens the existing tenant-scoped
+  `/users/{id}` (so licenses/role load correctly); mutations stay on the
+  tenant-scoped pages to keep audit/scoping clear (AGENTS rule 6). New
+  §7 route → `TestRouteSurface` count 17→18. SPEC §7 did not list this
+  endpoint; recorded here per rule 13 (it keeps §6.1 truthful and is the
+  documented platform-admin exception).

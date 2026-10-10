@@ -49,20 +49,27 @@ func deleteTenant(t *testing.T, e *maEnv, tenantID int64) {
 		ids = append(ids, id)
 	}
 	rows.Close()
-	for _, id := range ids {
-		_, _ = e.pool.Exec("DELETE FROM sessions WHERE user_id = ?", id)
-		_, _ = e.pool.Exec("DELETE FROM otp_codes WHERE user_id = ?", id)
-		_, _ = e.pool.Exec("DELETE FROM licenses WHERE tenant_id = ?", tenantID)
+	exec := func(q string, args ...any) {
+		if _, err := e.pool.Exec(q, args...); err != nil {
+			t.Errorf("cleanup %q: %v", q, err)
+		}
 	}
-	_, _ = e.pool.Exec("DELETE FROM audit_log WHERE tenant_id = ?", tenantID)
-	_, _ = e.pool.Exec("DELETE FROM payments WHERE tenant_id = ?", tenantID)
-	_, _ = e.pool.Exec("DELETE FROM import_batches WHERE tenant_id = ?", tenantID)
-	_, _ = e.pool.Exec("DELETE FROM tenant_users WHERE tenant_id = ?", tenantID)
-	_, _ = e.pool.Exec("DELETE FROM tenant_products WHERE tenant_id = ?", tenantID)
 	for _, id := range ids {
-		_, _ = e.pool.Exec("DELETE FROM users WHERE id = ?", id)
+		exec("DELETE FROM sessions WHERE user_id = ?", id)
+		exec("DELETE FROM otp_codes WHERE user_id = ?", id)
 	}
-	_, _ = e.pool.Exec("DELETE FROM tenants WHERE id = ?", tenantID)
+	// payments reference licenses and users, so they must be removed before
+	// licenses (the other order silently left orphan tenants behind).
+	exec("DELETE FROM payments WHERE tenant_id = ?", tenantID)
+	exec("DELETE FROM licenses WHERE tenant_id = ?", tenantID)
+	exec("DELETE FROM audit_log WHERE tenant_id = ?", tenantID)
+	exec("DELETE FROM import_batches WHERE tenant_id = ?", tenantID)
+	exec("DELETE FROM tenant_users WHERE tenant_id = ?", tenantID)
+	exec("DELETE FROM tenant_products WHERE tenant_id = ?", tenantID)
+	for _, id := range ids {
+		exec("DELETE FROM users WHERE id = ?", id)
+	}
+	exec("DELETE FROM tenants WHERE id = ?", tenantID)
 }
 
 func loginDash(t *testing.T, e *maEnv, username, password string) string {

@@ -3,6 +3,8 @@
 
 import { getActAsTenant, getToken } from '../auth/storage'
 import type {
+  AllUsersListResponse,
+  AllUsersQuery,
   AppLoginResponse,
   AuditListResponse,
   CreateTenantInput,
@@ -142,6 +144,20 @@ export const dash = {
   },
   listTenants(): Promise<{ tenants: TenantView[] }> {
     return request('/dash/tenants', { noActAs: true })
+  },
+  /** Platform-admin cross-tenant user list (all tenants at once). */
+  listAllUsers(params: AllUsersQuery): Promise<AllUsersListResponse> {
+    return request(
+      '/dash/all-users' +
+        queryString({
+          tenant_id: params.tenant_id,
+          status: params.status,
+          product: params.product,
+          q: params.q,
+          page: params.page,
+        }),
+      { noActAs: true },
+    )
   },
   createTenant(body: CreateTenantInput): Promise<CreateTenantResponse> {
     return request('/dash/tenants', { method: 'POST', body, noActAs: true })

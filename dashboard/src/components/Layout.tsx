@@ -47,6 +47,7 @@ export function Layout() {
           <NavItem to="/import" label="CSV import" />
           <NavItem to="/tenant" label="Tenant settings" />
           {isPlatformAdmin ? <NavItem to="/tenants" label="Platform tenants" /> : null}
+          {isPlatformAdmin ? <NavItem to="/all-users" label="All users" /> : null}
           <NavItem to="/tools" label="API tools" />
         </nav>
         <div className="border-t border-slate-200 p-3 text-xs text-slate-500">

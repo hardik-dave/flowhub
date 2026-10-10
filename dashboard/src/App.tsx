@@ -10,6 +10,7 @@ import { UserDetailPage } from './pages/UserDetailPage'
 import { ImportPage } from './pages/ImportPage'
 import { TenantPage } from './pages/TenantPage'
 import { TenantsPage } from './pages/TenantsPage'
+import { AllUsersPage } from './pages/AllUsersPage'
 import { ToolsPage } from './pages/ToolsPage'
 
 const queryClient = new QueryClient({
@@ -27,6 +28,12 @@ function TenantsRouteGuard() {
   return <TenantsPage />
 }
 
+function AllUsersRouteGuard() {
+  const { isPlatformAdmin } = useAuth()
+  if (!isPlatformAdmin) return <Navigate to="/" replace />
+  return <AllUsersPage />
+}
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -42,6 +49,7 @@ export default function App() {
                   <Route path="import" element={<ImportPage />} />
                   <Route path="tenant" element={<TenantPage />} />
                   <Route path="tenants" element={<TenantsRouteGuard />} />
+                  <Route path="all-users" element={<AllUsersRouteGuard />} />
                   <Route path="tools" element={<ToolsPage />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Route>

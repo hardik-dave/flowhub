@@ -45,7 +45,7 @@ func TestRouteSurface(t *testing.T) {
 		"POST /api/v1/app/register",
 		"POST /api/v1/app/otp/request",
 		"POST /api/v1/app/otp/verify",
-		// §7 dashboard-facing (17)
+		// §7 dashboard-facing (18)
 		"POST /api/v1/dash/login",
 		"POST /api/v1/dash/logout",
 		"GET /api/v1/dash/users",
@@ -65,6 +65,8 @@ func TestRouteSurface(t *testing.T) {
 		"PATCH /api/v1/dash/tenants/{id}/status",
 		// DECISIONS.md: platform-admin tenant list (1)
 		"GET /api/v1/dash/tenants",
+		// DECISIONS.md: platform-admin cross-tenant user list (1)
+		"GET /api/v1/dash/all-users",
 	}
 
 	wantSet := make(map[string]bool, len(want))

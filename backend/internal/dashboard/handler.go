@@ -283,6 +283,85 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// allUserView is one (tenant, user) row of the platform-admin
+// cross-tenant list (GET /dash/all-users).
+type allUserView struct {
+	userView
+	TenantID   int64  `json:"tenant_id"`
+	TenantSlug string `json:"tenant_slug"`
+	TenantName string `json:"tenant_name"`
+}
+
+// ListAllUsers is the platform-admin-only cross-tenant user list. It is
+// the documented exception to per-tenant scoping (AGENTS.md rule 6):
+// access is gated on sc.IsPlatformAdmin and it ignores act-as.
+func (h *Handler) ListAllUsers(w http.ResponseWriter, r *http.Request) {
+	sc, ok := mustScope(w, r)
+	if !ok {
+		return
+	}
+	if !sc.IsPlatformAdmin {
+		httpx.Error(w, http.StatusForbidden, "Platform admin access required.")
+		return
+	}
+	ctx := r.Context()
+	f := store.UserFilter{
+		Status:      strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("status"))),
+		ProductCode: strings.TrimSpace(r.URL.Query().Get("product")),
+		Query:       strings.TrimSpace(r.URL.Query().Get("q")),
+	}
+	if f.Status != "" && !validUserStatuses[f.Status] {
+		httpx.Error(w, http.StatusBadRequest, "status must be ACTIVE, DEACTIVATED or BANNED.")
+		return
+	}
+	if v := strings.TrimSpace(r.URL.Query().Get("tenant_id")); v != "" {
+		tid, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || tid <= 0 {
+			httpx.Error(w, http.StatusBadRequest, "tenant_id must be a positive integer.")
+			return
+		}
+		f.TenantID = tid
+	}
+	page, offset := pageOf(r)
+	f.Offset, f.Limit = offset, pageSize
+
+	rows, err := h.store.ListAllUsers(ctx, f)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "Could not list users.")
+		return
+	}
+	total, err := h.store.CountAllUsers(ctx, f)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "Could not list users.")
+		return
+	}
+	out := make([]allUserView, 0, len(rows))
+	for i := range rows {
+		v, err := h.buildAllUserView(ctx, &rows[i])
+		if err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "Could not list users.")
+			return
+		}
+		out = append(out, v)
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"users": out, "page": page, "page_size": pageSize, "total": total,
+	})
+}
+
+func (h *Handler) buildAllUserView(ctx context.Context, u *store.UserWithTenant) (allUserView, error) {
+	base, err := h.buildUserView(ctx, u.TenantID, &u.User)
+	if err != nil {
+		return allUserView{}, err
+	}
+	return allUserView{
+		userView:   base,
+		TenantID:   u.TenantID,
+		TenantSlug: u.TenantSlug,
+		TenantName: u.TenantName,
+	}, nil
+}
+
 type createUserRequest struct {
 	Username         string `json:"username"`
 	FirstName        string `json:"first_name"`

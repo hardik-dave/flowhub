@@ -109,6 +109,9 @@ func newRouter(cfg *config.Config, rl *httpx.RateLimiter, h *handlers) *chi.Mux 
 			r.With(h.dashAuth).Get("/tenant", h.dash.GetTenant)
 			r.With(h.dashAuth).Patch("/tenant", h.dash.UpdateTenant)
 
+			// Platform-admin cross-tenant user list (DECISIONS.md).
+			r.With(h.dashAuth).Get("/all-users", h.dash.ListAllUsers)
+
 			// Platform-admin (house-tenant SUPERADMIN) — SPEC.md §7;
 			// GET list added by DECISIONS.md for the tenant page.
 			r.With(h.dashAuth).Get("/tenants", h.dash.ListTenants)

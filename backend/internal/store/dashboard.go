@@ -13,11 +13,14 @@ import (
 // except the documented platform-admin tenant paths is tenant-scoped
 // (AGENTS.md rule 6).
 
-// UserFilter narrows GET /dash/users.
+// UserFilter narrows GET /dash/users. TenantID is used only by the
+// platform-admin cross-tenant list (GET /dash/all-users): 0 means "any
+// tenant", otherwise it pins one.
 type UserFilter struct {
 	Status      string
 	ProductCode string
 	Query       string
+	TenantID    int64
 	Offset      int
 	Limit       int
 }
@@ -87,6 +90,92 @@ func (s *Store) CountUsers(ctx context.Context, tenantID int64, f UserFilter) (i
 		return 0, err
 	}
 	return n, nil
+}
+
+// UserWithTenant is a user joined to one of their tenant memberships.
+// It backs the platform-admin cross-tenant list (GET /dash/all-users);
+// every row is a distinct (tenant, user) pair.
+type UserWithTenant struct {
+	User
+	TenantID   int64
+	TenantSlug string
+	TenantName string
+	Role       Role
+}
+
+// allUsersFrom builds the shared FROM/WHERE clause for the cross-tenant
+// user list. The caller supplies the SELECT and LIMIT/OFFSET.
+func allUsersFrom(f UserFilter) (string, []any) {
+	q := " FROM users u" +
+		" JOIN tenant_users tu ON tu.user_id = u.id" +
+		" JOIN tenants t ON t.id = tu.tenant_id"
+	var args []any
+	if f.ProductCode != "" {
+		q += " JOIN licenses l ON l.user_id = u.id AND l.tenant_id = tu.tenant_id" +
+			" JOIN products p ON p.id = l.product_id AND p.code = ?"
+		args = append(args, f.ProductCode)
+	}
+	where, wargs := userWhere(f)
+	q += " WHERE 1=1"
+	if f.TenantID != 0 {
+		q += " AND tu.tenant_id = ?"
+		args = append(args, f.TenantID)
+	}
+	q += where
+	args = append(args, wargs...)
+	return q, args
+}
+
+func (s *Store) ListAllUsers(ctx context.Context, f UserFilter) ([]UserWithTenant, error) {
+	from, args := allUsersFrom(f)
+	q := "SELECT " + userColsAliased + ", tu.tenant_id, t.slug, t.name, tu.role" + from +
+		" ORDER BY u.id DESC, tu.tenant_id ASC LIMIT ? OFFSET ?"
+	args = append(args, f.Limit, f.Offset)
+
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []UserWithTenant
+	for rows.Next() {
+		uw, err := scanUserWithTenant(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *uw)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) CountAllUsers(ctx context.Context, f UserFilter) (int, error) {
+	from, args := allUsersFrom(f)
+	var n int
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*)"+from, args...).Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+func scanUserWithTenant(row interface{ Scan(...any) error }) (*UserWithTenant, error) {
+	var (
+		uw                   UserWithTenant
+		first, last, contact sql.NullString
+		email, city, state   sql.NullString
+		role                 string
+	)
+	if err := row.Scan(&uw.ID, &uw.Username, &uw.PasswordHash, &first, &last, &contact,
+		&uw.MobileVerified, &email, &city, &state, &uw.Status, &uw.TokenVersion,
+		&uw.TenantID, &uw.TenantSlug, &uw.TenantName, &role); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	uw.FirstName, uw.LastName, uw.ContactNo = first.String, last.String, contact.String
+	uw.Email, uw.City, uw.State = email.String, city.String, state.String
+	uw.Role = Role(role)
+	return &uw, nil
 }
 
 // UserLicense is a license joined with its product, for detail/list views.

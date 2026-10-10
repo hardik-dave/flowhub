@@ -81,6 +81,24 @@ export interface UsersListResponse {
   total: number
 }
 
+/** One (tenant, user) row of the platform-admin cross-tenant list. */
+export interface AllUserRow extends UserView {
+  tenant_id: number
+  tenant_slug: string
+  tenant_name: string
+}
+
+export interface AllUsersQuery extends UsersQuery {
+  tenant_id?: number
+}
+
+export interface AllUsersListResponse {
+  users: AllUserRow[]
+  page: number
+  page_size: number
+  total: number
+}
+
 export interface AuditListResponse {
   entries: AuditView[]
   page: number
