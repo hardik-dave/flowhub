@@ -60,6 +60,12 @@ func newMAEnv(t *testing.T) *maEnv {
 // newMAEnvLimited builds the same harness with a different per-IP rate
 // limit so the M-D rate-limit test can trip the §9 login ceiling.
 func newMAEnvLimited(t *testing.T, limit int) *maEnv {
+	return newMAEnvWithEcho(t, limit, false)
+}
+
+// newMAEnvWithEcho is the same harness with the dev-only OTP echo flag
+// under test control.
+func newMAEnvWithEcho(t *testing.T, limit int, echo bool) *maEnv {
 	t.Helper()
 	dsn := os.Getenv("HUB_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -77,7 +83,7 @@ func newMAEnvLimited(t *testing.T, limit int) *maEnv {
 	st := store.New(pool)
 	sender := &captureSender{}
 	now := time.Now
-	ah := auth.NewHandler(st, sender, now)
+	ah := auth.NewHandler(st, sender, now, echo)
 	vs := verify.NewService(st, now)
 	h := &handlers{
 		verify:   verify.NewHandler(vs),
@@ -333,4 +339,80 @@ func registerCleanup(t *testing.T, pool *sql.DB, username string) func() {
 			}
 		}
 	}
+}
+
+// TestOTPRequestDevEcho pins the dev-only OTP echo: with the flag on the
+// /app/otp/request body carries dev_code equal to the delivered code;
+// with it off the field is absent. main.go additionally requires MSG91 to
+// be unconfigured, so production can never echo.
+func TestOTPRequestDevEcho(t *testing.T) {
+	register := func(t *testing.T, e *maEnv) string {
+		t.Helper()
+		username := fmt.Sprintf("otpecho_%d", time.Now().UnixNano())
+		mobile := "+9198765" + fmt.Sprintf("%05d", time.Now().UnixNano()%100000)
+		rec := e.postJSON(t, "/api/v1/app/register", map[string]any{
+			"tenant_slug": "flowos", "product_code": "flowos", "username": username,
+			"password": "password123", "first_name": "O", "last_name": "E", "mobile": mobile,
+		}, "")
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("register = %d %s", rec.Code, rec.Body)
+		}
+		t.Cleanup(registerCleanup(t, e.pool, username))
+		return username
+	}
+
+	t.Run("on", func(t *testing.T) {
+		e := newMAEnvWithEcho(t, 1000, true)
+		username := register(t, e)
+		rec := e.postJSON(t, "/api/v1/app/otp/request", map[string]any{
+			"tenant_slug": "flowos", "username": username, "purpose": "FIRST_LOGIN",
+		}, "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("otp/request = %d %s", rec.Code, rec.Body)
+		}
+		var body struct {
+			OTPSent bool   `json:"otp_sent"`
+			DevCode string `json:"dev_code"`
+		}
+		decode(t, rec, &body)
+		if !body.OTPSent {
+			t.Fatalf("otp_sent false: %s", rec.Body)
+		}
+		if len(body.DevCode) != 6 {
+			t.Fatalf("dev_code = %q, want 6 digits", body.DevCode)
+		}
+		if want := e.sender.lastCode(); body.DevCode != want {
+			t.Fatalf("dev_code = %q, want delivered %q", body.DevCode, want)
+		}
+		// dev echo also bypasses the §6.4 cooldown: an immediate resend is 200.
+		rec = e.postJSON(t, "/api/v1/app/otp/request", map[string]any{
+			"tenant_slug": "flowos", "username": username, "purpose": "FIRST_LOGIN",
+		}, "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("second otp/request = %d %s, want 200 (cooldown bypassed)", rec.Code, rec.Body)
+		}
+	})
+
+	t.Run("off", func(t *testing.T) {
+		e := newMAEnvWithEcho(t, 1000, false)
+		username := register(t, e)
+		rec := e.postJSON(t, "/api/v1/app/otp/request", map[string]any{
+			"tenant_slug": "flowos", "username": username, "purpose": "FIRST_LOGIN",
+		}, "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("otp/request = %d %s", rec.Code, rec.Body)
+		}
+		var body map[string]any
+		decode(t, rec, &body)
+		if _, ok := body["dev_code"]; ok {
+			t.Fatalf("dev_code present with echo off: %s", rec.Body)
+		}
+		// With echo off the §6.4 cooldown is enforced: immediate resend is 429.
+		rec = e.postJSON(t, "/api/v1/app/otp/request", map[string]any{
+			"tenant_slug": "flowos", "username": username, "purpose": "FIRST_LOGIN",
+		}, "")
+		if rec.Code != http.StatusTooManyRequests {
+			t.Fatalf("second otp/request = %d %s, want 429", rec.Code, rec.Body)
+		}
+	})
 }

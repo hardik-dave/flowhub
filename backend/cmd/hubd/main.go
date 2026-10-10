@@ -46,7 +46,13 @@ type handlers struct {
 
 func buildHandlers(cfg *config.Config, st *store.Store) *handlers {
 	sender := auth.NewSender(cfg)
-	ah := auth.NewHandler(st, sender, time.Now)
+	// Echo the OTP only when explicitly enabled AND production SMS is
+	// unconfigured (dev). Two independent guards so prod can never leak.
+	devEchoOTP := cfg.DevEchoOTP && cfg.Msg91.AuthKey == "" && cfg.Msg91.DLTTemplateID == ""
+	if devEchoOTP {
+		slog.Info("dev OTP echo enabled — /app/otp/request returns dev_code and the 60s cooldown is bypassed")
+	}
+	ah := auth.NewHandler(st, sender, time.Now, devEchoOTP)
 	vs := verify.NewService(st, time.Now)
 	return &handlers{
 		verify:   verify.NewHandler(vs),
@@ -94,6 +100,7 @@ func newRouter(cfg *config.Config, rl *httpx.RateLimiter, h *handlers) *chi.Mux 
 
 			r.With(h.dashAuth).Patch("/licenses/{id}/status", h.dash.UpdateLicenseStatus)
 			r.With(h.dashAuth).Post("/licenses/{id}/regenerate-key", h.dash.RegenerateLicenseKey)
+			r.With(h.dashAuth).Post("/licenses/{id}/validity", h.dash.SetLicenseValidity)
 
 			// Payments land in a later change-set; stays 501 for now.
 			r.With(h.dashAuth).Post("/payments", notImplemented("§7"))

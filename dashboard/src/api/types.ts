@@ -106,11 +106,18 @@ export interface CreateUserResponse {
   username: string
   password: string
   license_key: string
+  /** Present only when a subscription window was supplied. */
+  valid_until?: string
 }
 
 export interface GrantLicenseResponse {
   license_id: number
   license_key: string
+}
+
+export interface SetLicenseValidityResponse {
+  license_id: number
+  valid_until: string
 }
 
 export interface ImportRowError {
@@ -194,4 +201,5 @@ export interface AppLoginResponse {
 export interface OtpRequestResponse {
   otp_sent: boolean
   expires_in_seconds: number
+  dev_code?: string
 }

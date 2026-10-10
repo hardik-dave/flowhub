@@ -96,6 +96,39 @@ func isDuplicate(err error) bool {
 	return errors.As(err, &me) && me.Number == 1062
 }
 
+// parseWindow validates the plan/paid_at/valid_from trio shared by the
+// dashboard's access-window writes (create-user and set-license-validity).
+// All three empty is allowed (no window) and returns zero times with ok
+// true. A partial or malformed trio writes the 400 response and returns
+// ok false; callers must return immediately when ok is false.
+func parseWindow(w http.ResponseWriter, plan, paidAtStr, validFromStr string) (string, time.Time, time.Time, time.Time, bool) {
+	plan = strings.ToUpper(strings.TrimSpace(plan))
+	paidAtStr = strings.TrimSpace(paidAtStr)
+	validFromStr = strings.TrimSpace(validFromStr)
+	if plan == "" && paidAtStr == "" && validFromStr == "" {
+		return "", time.Time{}, time.Time{}, time.Time{}, true
+	}
+	if plan == "" || paidAtStr == "" || validFromStr == "" {
+		httpx.Error(w, http.StatusBadRequest, "plan, paid_at and valid_from must all be provided together.")
+		return "", time.Time{}, time.Time{}, time.Time{}, false
+	}
+	if !validPlans[plan] {
+		httpx.Error(w, http.StatusBadRequest, "plan must be MONTHLY, QUARTERLY or ANNUAL.")
+		return "", time.Time{}, time.Time{}, time.Time{}, false
+	}
+	paidAt, err := time.Parse("2006-01-02", paidAtStr)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "paid_at must be YYYY-MM-DD.")
+		return "", time.Time{}, time.Time{}, time.Time{}, false
+	}
+	validFrom, err := time.Parse("2006-01-02", validFromStr)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "valid_from must be YYYY-MM-DD.")
+		return "", time.Time{}, time.Time{}, time.Time{}, false
+	}
+	return plan, paidAt, validFrom, addPlan(validFrom, plan), true
+}
+
 // --- view types ------------------------------------------------------
 
 type licenseView struct {
@@ -261,6 +294,9 @@ type createUserRequest struct {
 	BrokerClientCode string `json:"broker_client_code"`
 	ReferralCode     string `json:"referral_code"`
 	ProductCode      string `json:"product_code"`
+	Plan             string `json:"plan"`
+	PaidAt           string `json:"paid_at"`
+	ValidFrom        string `json:"valid_from"`
 }
 
 func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
@@ -315,6 +351,11 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	plan, paidAt, validFrom, validUntil, ok := parseWindow(w, req.Plan, req.PaidAt, req.ValidFrom)
+	if !ok {
+		return
+	}
+
 	password, err := auth.RandomPassword()
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "Could not create the user.")
@@ -351,16 +392,34 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		if err := h.store.InsertMembership(ctx, tx, sc.TenantID, id, store.RoleAlgoUser); err != nil {
 			return err
 		}
-		if _, err := h.store.InsertLicense(ctx, tx, &store.License{
+		lid, err := h.store.InsertLicense(ctx, tx, &store.License{
 			TenantID: sc.TenantID, UserID: id, ProductID: product.ID,
 			LicenseKeyHash: keyHash, LicenseKeyHint: license.Hint(key), Status: "ACTIVE",
-		}); err != nil {
+		})
+		if err != nil {
 			return err
+		}
+		if !validUntil.IsZero() {
+			if err := h.store.UpdateLicenseValidUntil(ctx, tx, sc.TenantID, lid, validUntil); err != nil {
+				return err
+			}
+			if _, err := h.store.InsertPayment(ctx, tx, &store.Payment{
+				TenantID: sc.TenantID, UserID: id, LicenseID: lid,
+				AmountMinorUnits: 0, Currency: "INR", Method: "MANUAL", Plan: plan,
+				PaidAt: paidAt, ValidFrom: validFrom, ValidUntil: validUntil,
+				RecordedBy: sc.UserID, Note: "manual",
+			}); err != nil {
+				return err
+			}
+		}
+		after := map[string]any{"username": req.Username, "product_code": req.ProductCode, "role": string(store.RoleAlgoUser)}
+		if !validUntil.IsZero() {
+			after["valid_until"] = validUntil.Format("2006-01-02")
 		}
 		actor := sc.UserID
 		return h.store.InsertAudit(ctx, tx, &store.Audit{
 			TenantID: sc.TenantID, ActorUserID: &actor, Action: "USER_CREATED", SubjectUserID: &id,
-			After:  mustJSON(map[string]any{"username": req.Username, "product_code": req.ProductCode, "role": string(store.RoleAlgoUser)}),
+			After:  mustJSON(after),
 			Reason: "Created by admin",
 		})
 	})
@@ -372,9 +431,13 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "Could not create the user.")
 		return
 	}
-	httpx.JSON(w, http.StatusCreated, map[string]any{
+	resp := map[string]any{
 		"user_id": userID, "username": req.Username, "password": password, "license_key": key,
-	})
+	}
+	if !validUntil.IsZero() {
+		resp["valid_until"] = validUntil.Format("2006-01-02")
+	}
+	httpx.JSON(w, http.StatusCreated, resp)
 }
 
 func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
@@ -672,6 +735,77 @@ func (h *Handler) RegenerateLicenseKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"license_id": id, "license_key": key})
+}
+
+// SetLicenseValidity sets or extends the access window on an existing
+// license: it writes subscription_valid_until plus a manual payment row
+// and an audit row in one transaction. The window semantics (plan +
+// valid_from + paid_at, expiry = addPlan) are identical to CSV import
+// and create-user.
+func (h *Handler) SetLicenseValidity(w http.ResponseWriter, r *http.Request) {
+	sc, ok := mustScope(w, r)
+	if !ok {
+		return
+	}
+	ctx := r.Context()
+	id, ok := pathID(r)
+	if !ok {
+		httpx.Error(w, http.StatusNotFound, "No such license.")
+		return
+	}
+	var req struct {
+		Plan      string `json:"plan"`
+		PaidAt    string `json:"paid_at"`
+		ValidFrom string `json:"valid_from"`
+	}
+	if !httpx.DecodeJSON(w, r, &req) {
+		return
+	}
+	plan, paidAt, validFrom, validUntil, ok := parseWindow(w, req.Plan, req.PaidAt, req.ValidFrom)
+	if !ok {
+		return
+	}
+	if validUntil.IsZero() {
+		httpx.Error(w, http.StatusBadRequest, "plan, paid_at and valid_from are required.")
+		return
+	}
+	lic, err := h.store.LicenseByID(ctx, sc.TenantID, id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			httpx.Error(w, http.StatusNotFound, "No such license.")
+			return
+		}
+		httpx.Error(w, http.StatusInternalServerError, "Could not set the access window.")
+		return
+	}
+	actor := sc.UserID
+	subject := lic.UserID
+	err = h.store.InTx(ctx, func(tx store.DBTX) error {
+		if err := h.store.UpdateLicenseValidUntil(ctx, tx, sc.TenantID, id, validUntil); err != nil {
+			return err
+		}
+		if _, err := h.store.InsertPayment(ctx, tx, &store.Payment{
+			TenantID: sc.TenantID, UserID: lic.UserID, LicenseID: id,
+			AmountMinorUnits: 0, Currency: "INR", Method: "MANUAL", Plan: plan,
+			PaidAt: paidAt, ValidFrom: validFrom, ValidUntil: validUntil,
+			RecordedBy: sc.UserID, Note: "manual",
+		}); err != nil {
+			return err
+		}
+		return h.store.InsertAudit(ctx, tx, &store.Audit{
+			TenantID: sc.TenantID, ActorUserID: &actor, Action: "LICENSE_VALIDITY_SET", SubjectUserID: &subject,
+			After: mustJSON(map[string]any{
+				"license_id": id, "product_id": lic.ProductID, "plan": plan,
+				"valid_until": validUntil.Format("2006-01-02"),
+			}),
+			Reason: "Access window set by admin",
+		})
+	})
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "Could not set the access window.")
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"license_id": id, "valid_until": validUntil.Format("2006-01-02")})
 }
 
 // --- §7 audit --------------------------------------------------------

@@ -22,7 +22,9 @@ type SmsSender interface {
 // ConsoleSender is the dev transport (SPEC §6.4). It writes the SMS
 // body to a writer for a human developer to read. It is deliberately
 // NOT the structured logger: AGENTS.md rule 8 forbids OTP codes in
-// logs, and production always uses MSG91. See DECISIONS.md.
+// logs, and production always uses MSG91. See DECISIONS.md. The default
+// sink is stderr (not stdout) so a `2>&1` redirect and a terminal that
+// merges streams show the dev code next to the slog request lines.
 type ConsoleSender struct {
 	Out io.Writer
 }
@@ -30,7 +32,7 @@ type ConsoleSender struct {
 func (c ConsoleSender) SendOTP(mobile, code string) error {
 	w := c.Out
 	if w == nil {
-		w = os.Stdout
+		w = os.Stderr
 	}
 	_, err := fmt.Fprintf(w, "[dev-sms] to=%s body=Your FlowOS verification code is %s. Valid 5 minutes.\n", mobile, code)
 	return err
@@ -93,5 +95,5 @@ func NewSender(cfg *config.Config) SmsSender {
 			TemplateID: cfg.Msg91.DLTTemplateID,
 		}
 	}
-	return &ConsoleSender{Out: os.Stdout}
+	return &ConsoleSender{Out: os.Stderr}
 }

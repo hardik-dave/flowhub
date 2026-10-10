@@ -33,10 +33,15 @@ var (
 // OTP issues and checks one-time codes. Codes are argon2id-hashed at
 // rest and never logged; delivery goes through SmsSender.
 type OTP struct {
-	store  *store.Store
-	sender SmsSender
-	now    func() time.Time
+	store        *store.Store
+	sender       SmsSender
+	now          func() time.Time
+	skipCooldown bool
 }
+
+// SetSkipCooldown disables the §6.4 60s resend cooldown. Dev-only (wired
+// from DEV_ECHO_OTP); production never calls it.
+func (o *OTP) SetSkipCooldown(v bool) { o.skipCooldown = v }
 
 func NewOTP(st *store.Store, sender SmsSender, now func() time.Time) *OTP {
 	if now == nil {
@@ -73,17 +78,19 @@ func (o *OTP) Deliver(mobile, code string) {
 	}
 }
 
-// Issue checks the cooldown, stores a fresh code, and sends it.
-func (o *OTP) Issue(ctx context.Context, userID int64, mobile, purpose string) (expiresInSeconds int, err error) {
+// Issue checks the cooldown, stores a fresh code, and sends it. It also
+// returns the plaintext code so a dev-only caller may echo it back to the
+// requester (never logged — AGENTS rule 8); production callers ignore it.
+func (o *OTP) Issue(ctx context.Context, userID int64, mobile, purpose string) (expiresInSeconds int, code string, err error) {
 	last, err := o.store.LatestOTP(ctx, userID, purpose)
 	switch {
 	case err == nil:
-		if o.now().Sub(last.CreatedAt) < OTPCooldown {
-			return 0, ErrCooldown
+		if !o.skipCooldown && o.now().Sub(last.CreatedAt) < OTPCooldown {
+			return 0, "", ErrCooldown
 		}
 	case errors.Is(err, store.ErrNotFound):
 	default:
-		return 0, err
+		return 0, "", err
 	}
 
 	rec, code := o.Prepare(userID, purpose)
@@ -91,10 +98,10 @@ func (o *OTP) Issue(ctx context.Context, userID int64, mobile, purpose string) (
 		_, e := o.store.InsertOTP(ctx, tx, rec)
 		return e
 	}); err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	o.Deliver(mobile, code)
-	return int(OTPTTL / time.Second), nil
+	return int(OTPTTL / time.Second), code, nil
 }
 
 // Check validates the presented code against the newest OTP row for

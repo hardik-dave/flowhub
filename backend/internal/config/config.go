@@ -18,6 +18,7 @@ type Config struct {
 	SessionSecret   string
 	PlatformAdmin   PlatformAdmin
 	Msg91           Msg91
+	DevEchoOTP      bool
 }
 
 type PlatformAdmin struct {
@@ -53,6 +54,7 @@ func Load() (*Config, error) {
 			SenderID:      os.Getenv("MSG91_SENDER_ID"),
 			DLTTemplateID: os.Getenv("MSG91_DLT_TEMPLATE_ID"),
 		},
+		DevEchoOTP: envBool("DEV_ECHO_OTP"),
 	}
 	if cfg.MySQLDSN == "" {
 		return nil, fmt.Errorf("MYSQL_DSN is not set — copy .env.example to .env (repo root or backend/) and set it, see README")
@@ -65,6 +67,16 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// envBool reads a yes/no flag; anything except a truthy value is false.
+func envBool(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func filepathJoinParent(name string) string {

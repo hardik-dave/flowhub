@@ -12,6 +12,7 @@ import type {
   ImportResult,
   LoginResponse,
   OtpRequestResponse,
+  SetLicenseValidityResponse,
   TenantView,
   UpdateTenantInput,
   UserDetail,
@@ -123,6 +124,12 @@ export const dash = {
   },
   regenerateLicenseKey(id: number): Promise<GrantLicenseResponse> {
     return request(`/dash/licenses/${id}/regenerate-key`, { method: 'POST', body: {} })
+  },
+  setLicenseValidity(
+    id: number,
+    body: { plan: string; paid_at: string; valid_from: string },
+  ): Promise<SetLicenseValidityResponse> {
+    return request(`/dash/licenses/${id}/validity`, { method: 'POST', body })
   },
   listAudit(subjectUserId?: number, page = 1): Promise<AuditListResponse> {
     return request('/dash/audit' + queryString({ subject_user_id: subjectUserId, page }))

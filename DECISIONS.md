@@ -342,3 +342,60 @@ Format: date · decision · one line of why. The builder appends here
   status+reason and one-time-secret UI. Frontend tests: 35 passing (8
   files).
 
+- 2026-10-10 · Dashboard user creation with access (no CSV). The
+  "Create user" modal/endpoint gained optional `plan`, `paid_at`,
+  `valid_from` (all-or-nothing, same validation as CSV import). When
+  supplied it writes `licenses.subscription_valid_until`, a `MANUAL`
+  payment row, and records `valid_until` in the `USER_CREATED` audit row
+  — same transaction, mirroring `ImportCSV`. The product field is now a
+  dropdown of the acting tenant's granted products instead of a hardcoded
+  `flowos` text default. Rationale: the owner asked for easy per-tenant
+  user creation through the UI; reusing the exact import semantics keeps
+  one meaning of "valid" and §6.1 truthful.
+
+- 2026-10-10 · Dashboard set access window + user-detail mobile
+  verification. Added `POST /dash/licenses/{id}/validity` (any dashboard
+  role in the acting tenant; tenant-scoped) that sets an existing
+  license's `subscription_valid_until` from `plan` + `valid_from` +
+  `paid_at`, writing a `MANUAL` ₹0 payment and a `LICENSE_VALIDITY_SET`
+  audit row in one transaction — the same window semantics as CSV
+  import / create-user, factored into a shared `parseWindow` helper.
+  Rationale: a created user with no window verifies as paused forever;
+  this closes that gap without a one-off DB edit. The user detail page
+  also gained a mobile-verification card (Send/Resend + Verify) that
+  calls the existing `/app/otp/request` + `/app/otp/verify`
+  (`FIRST_LOGIN`) endpoints, so an admin can drive first-login
+  verification without the API-tools page; in dev the code is read from
+  the hubd console. Backend tests: `TestSetLicenseValidity` (window,
+   payment, audit, 400 partial, 404 cross-tenant). Frontend tests: 39
+   passing (8 files).
+
+- 2026-10-10 · Mobile-verify card UX fix. The card only revealed the
+  code field after a successful OTP request, so a second click inside the
+  §6.4 60s cooldown (HTTP 429) left the admin stuck on "Send code" with
+  no way to enter the code they received. The card now treats a 429 as
+  "a code is already pending": it shows the code field and a notice, and
+  disables "Resend" for a 60s countdown. Frontend tests: 40 passing (8
+  files).
+
+- 2026-10-10 · Dev console SMS sender writes to **stderr**, not stdout
+  (`auth/sender.go`). slog's default logger already prints to stderr, so
+  the `[dev-sms]` code now shares that stream — visible in a terminal
+  that merges streams and captured by a `2>&1` redirect, while stdout
+  stays clean. Still the SPEC §6.4 dev transport, not the structured
+  logger (AGENTS rule 8 exemption unchanged).
+
+- 2026-10-10 · Dev-only OTP echo (`DEV_ECHO_OTP`, default false). When
+  it is true **and** `MSG91_*` is unconfigured, `/app/otp/request` adds
+  an optional `dev_code` field and the dashboard auto-fills the code —
+  one click to verify, no console/log hunting. `OTP.Issue` now returns
+  the plaintext code for this; the handler echoes it, but it is still
+  never logged (AGENTS rule 8 is about logs; the access log records only
+  method/path/status). The same flag also **bypasses the §6.4 60s resend
+  cooldown** in dev (`OTP.SetSkipCooldown`), so repeated Send clicks can
+  never trap the developer in a 429 dead-end; the cooldown logic itself
+  is unchanged and still enforced whenever the flag is off (asserted by
+  `TestOTPRequestDevEcho`). Both guards are required so production (which
+  always configures MSG91 per §6.4) can never echo or skip the cooldown.
+  Additive response field only — §6.1 `/app/verify` is untouched (AGENTS
+  rule 1).

@@ -20,7 +20,7 @@ import (
 // testHandlers wires handlers over a nil store — enough to register
 // routes; the surface tests never invoke them with a nil store.
 func testHandlers() *handlers {
-	ah := auth.NewHandler(nil, auth.NewSender(nil), time.Now)
+	ah := auth.NewHandler(nil, auth.NewSender(nil), time.Now, false)
 	vs := verify.NewService(nil, time.Now)
 	return &handlers{
 		verify:   verify.NewHandler(vs),
@@ -45,7 +45,7 @@ func TestRouteSurface(t *testing.T) {
 		"POST /api/v1/app/register",
 		"POST /api/v1/app/otp/request",
 		"POST /api/v1/app/otp/verify",
-		// §7 dashboard-facing (16)
+		// §7 dashboard-facing (17)
 		"POST /api/v1/dash/login",
 		"POST /api/v1/dash/logout",
 		"GET /api/v1/dash/users",
@@ -55,6 +55,7 @@ func TestRouteSurface(t *testing.T) {
 		"POST /api/v1/dash/users/{id}/licenses",
 		"PATCH /api/v1/dash/licenses/{id}/status",
 		"POST /api/v1/dash/licenses/{id}/regenerate-key",
+		"POST /api/v1/dash/licenses/{id}/validity",
 		"POST /api/v1/dash/payments",
 		"POST /api/v1/dash/imports",
 		"GET /api/v1/dash/audit",

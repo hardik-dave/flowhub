@@ -18,6 +18,12 @@ vi.mock('../api/client', async () => {
       grantLicense: vi.fn(),
       updateLicenseStatus: vi.fn(),
       regenerateLicenseKey: vi.fn(),
+      setLicenseValidity: vi.fn(),
+    },
+    app: {
+      ...actual.app,
+      otpRequest: vi.fn(),
+      otpVerify: vi.fn(),
     },
   }
 })
@@ -129,6 +135,97 @@ describe('UserDetailPage', () => {
 
     expect(client.dash.regenerateLicenseKey).toHaveBeenCalledWith(7)
     expect(await screen.findByText('FL-NEW1-NEW2-NEW3-NEW4')).toBeInTheDocument()
+  })
+
+  it('sets an access window on an existing license', async () => {
+    const user = userEvent.setup()
+    vi.mocked(client.dash.getUser).mockResolvedValue(
+      makeDetail(makeUser({ licenses: [{ id: 5, product_code: 'flowos', product_name: 'FlowOS', status: 'ACTIVE', key_hint: 'AAAA', valid_until: null }] })),
+    )
+    vi.mocked(client.dash.setLicenseValidity).mockResolvedValue({ license_id: 5, valid_until: '2026-11-10' })
+
+    renderPage()
+    await screen.findByText('alice')
+    await user.click(screen.getByRole('button', { name: 'Set access' }))
+    await user.selectOptions(screen.getByLabelText('Plan'), 'MONTHLY')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+
+    const today = new Date().toISOString().slice(0, 10)
+    expect(client.dash.setLicenseValidity).toHaveBeenCalledWith(5, {
+      plan: 'MONTHLY',
+      paid_at: today,
+      valid_from: today,
+    })
+  })
+
+  it('sends and verifies a first-login OTP when the mobile is unverified', async () => {
+    const user = userEvent.setup()
+    vi.mocked(client.dash.getUser).mockResolvedValue(makeDetail(makeUser({ mobile_verified: false })))
+    vi.mocked(client.app.otpRequest).mockResolvedValue({ otp_sent: true, expires_in_seconds: 300 })
+    vi.mocked(client.app.otpVerify).mockResolvedValue({ verified: true })
+
+    renderPage()
+    await screen.findByText('alice')
+    await user.click(screen.getByRole('button', { name: 'Send code' }))
+    await user.click(screen.getByLabelText('Verification code'))
+    await user.keyboard('123456')
+    await user.click(screen.getByRole('button', { name: 'Verify' }))
+
+    expect(client.app.otpRequest).toHaveBeenCalledWith({
+      tenant_slug: 'flowos',
+      username: 'alice',
+      purpose: 'FIRST_LOGIN',
+    })
+    expect(client.app.otpVerify).toHaveBeenCalledWith({
+      tenant_slug: 'flowos',
+      username: 'alice',
+      purpose: 'FIRST_LOGIN',
+      code: '123456',
+    })
+  })
+
+  it('reveals the code field when the OTP request is rate-limited (429)', async () => {
+    const user = userEvent.setup()
+    vi.mocked(client.dash.getUser).mockResolvedValue(makeDetail(makeUser({ mobile_verified: false })))
+    vi.mocked(client.app.otpRequest).mockRejectedValue(
+      new client.ApiError(429, 'A code was just sent. Please wait 60 seconds before requesting another.', {}),
+    )
+
+    renderPage()
+    await screen.findByText('alice')
+    await user.click(screen.getByRole('button', { name: 'Send code' }))
+
+    expect(await screen.findByLabelText('Verification code')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Verify' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Resend/ })).toBeDisabled()
+  })
+
+  it('auto-fills the code when the dev echo returns dev_code', async () => {
+    const user = userEvent.setup()
+    vi.mocked(client.dash.getUser).mockResolvedValue(makeDetail(makeUser({ mobile_verified: false })))
+    vi.mocked(client.app.otpRequest).mockResolvedValue({ otp_sent: true, expires_in_seconds: 300, dev_code: '123456' })
+    vi.mocked(client.app.otpVerify).mockResolvedValue({ verified: true })
+
+    renderPage()
+    await screen.findByText('alice')
+    await user.click(screen.getByRole('button', { name: 'Send code' }))
+
+    expect(await screen.findByLabelText('Verification code')).toHaveValue('123456')
+
+    await user.click(screen.getByRole('button', { name: 'Verify' }))
+    expect(client.app.otpVerify).toHaveBeenCalledWith({
+      tenant_slug: 'flowos',
+      username: 'alice',
+      purpose: 'FIRST_LOGIN',
+      code: '123456',
+    })
+  })
+
+  it('hides the mobile verification card once the mobile is verified', async () => {
+    vi.mocked(client.dash.getUser).mockResolvedValue(makeDetail(makeUser({ mobile_verified: true })))
+    renderPage()
+    await screen.findByText('alice')
+    expect(screen.queryByRole('button', { name: 'Send code' })).not.toBeInTheDocument()
   })
 
   it('renders the audit trail', async () => {

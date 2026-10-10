@@ -12,18 +12,24 @@ import (
 
 // Handler serves the §6.4 OTP endpoints and §7 dashboard login/logout.
 type Handler struct {
-	store *store.Store
-	otp   *OTP
-	now   func() time.Time
+	store      *store.Store
+	otp        *OTP
+	now        func() time.Time
+	devEchoOTP bool
 }
 
 // NewHandler builds the OTP service too; the user package reuses it for
-// the registration OTP.
-func NewHandler(st *store.Store, sender SmsSender, now func() time.Time) *Handler {
+// the registration OTP. devEchoOTP is a dev-only convenience: when true,
+// /app/otp/request echoes the plaintext code in its response so a local
+// dashboard can auto-fill it, and the §6.4 resend cooldown is bypassed so
+// the developer is never locked out. It must be false in production.
+func NewHandler(st *store.Store, sender SmsSender, now func() time.Time, devEchoOTP bool) *Handler {
 	if now == nil {
 		now = time.Now
 	}
-	return &Handler{store: st, otp: NewOTP(st, sender, now), now: now}
+	o := NewOTP(st, sender, now)
+	o.SetSkipCooldown(devEchoOTP)
+	return &Handler{store: st, otp: o, now: now, devEchoOTP: devEchoOTP}
 }
 
 // OTP exposes the underlying OTP service for the registration flow.
@@ -53,7 +59,7 @@ func (h *Handler) OTPRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = tenant
 
-	expiresIn, err := h.otp.Issue(r.Context(), user.ID, user.ContactNo, req.Purpose)
+	expiresIn, code, err := h.otp.Issue(r.Context(), user.ID, user.ContactNo, req.Purpose)
 	switch {
 	case errors.Is(err, ErrCooldown):
 		httpx.Error(w, http.StatusTooManyRequests, "A code was just sent. Please wait 60 seconds before requesting another.")
@@ -62,7 +68,11 @@ func (h *Handler) OTPRequest(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "Could not send the verification code.")
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"otp_sent": true, "expires_in_seconds": expiresIn})
+	resp := map[string]any{"otp_sent": true, "expires_in_seconds": expiresIn}
+	if h.devEchoOTP {
+		resp["dev_code"] = code
+	}
+	httpx.JSON(w, http.StatusOK, resp)
 }
 
 type otpVerify struct {

@@ -51,6 +51,17 @@ create the database (`CREATE DATABASE flowhub`) → `go run ./cmd/hubd`
 - Launch: run `hubd` with CWD = `backend/` so `migrations/` resolves;
   it applies migrations, then bootstraps the platform admin from
   `PLATFORM_ADMIN_*` (idempotent) and listens on `HUB_LISTEN`.
+- Dev OTP codes: set `DEV_ECHO_OTP=true` in `.env` (with `MSG91_*`
+  unset) and the dashboard mobile-verification card auto-fills the code
+  from the `/app/otp/request` response — no log hunting. In this mode
+  the §6.4 60s resend cooldown is also bypassed, so Send always returns
+  a fresh code. Otherwise hubd uses the SPEC §6.4 console SMS sender and
+  prints `[dev-sms] … body=Your FlowOS verification code is NNNNNN …` to
+  **stderr** (the same stream as its structured logs). To read codes
+  from a file, run `go run ./cmd/hubd > ../hubd.log 2>&1` from
+  `backend/`, then open `hubd.log`; the `[dev-sms]` line appears
+  immediately after the `POST /api/v1/app/otp/request status=200` log
+  line. Only the newest code is valid.
 - Deploy: `deploy/Caddyfile.example` (TLS + reverse proxy),
   `deploy/hubd.service.example` (systemd unit, `EnvironmentFile` =
   `.env`).

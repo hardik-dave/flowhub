@@ -16,6 +16,13 @@ export function UsersPage() {
     queryFn: () => dash.listUsers(filters),
   })
 
+  const tenant = useQuery({
+    queryKey: ['tenant'],
+    queryFn: () => dash.getTenant(),
+  })
+  const products = tenant.data?.products ?? []
+  const today = new Date().toISOString().slice(0, 10)
+
   const createUser = useMutation({
     mutationFn: (body: Record<string, unknown>) => dash.createUser(body),
     onSuccess: (data) => {
@@ -128,6 +135,13 @@ export function UsersPage() {
                 const s = String(v).trim()
                 if (s) body[k] = s
               }
+              if (!body.plan) {
+                delete body.paid_at
+                delete body.valid_from
+              } else if (!body.paid_at || !body.valid_from) {
+                setError('Pick a plan and both dates together.')
+                return
+              }
               createUser.mutate(body)
             }}
           >
@@ -141,8 +155,34 @@ export function UsersPage() {
               <Field label="State"><Input name="state" /></Field>
               <Field label="Broker client code"><Input name="broker_client_code" /></Field>
               <Field label="Referral code"><Input name="referral_code" /></Field>
-              <Field label="Product code*"><Input name="product_code" defaultValue="flowos" required /></Field>
+              <Field label="Product*">
+                <Select name="product_code" required defaultValue={products[0] ?? ''}>
+                  {products.length === 0 ? (
+                    <option value="">No products granted to this tenant</option>
+                  ) : (
+                    products.map((code) => <option key={code} value={code}>{code}</option>)
+                  )}
+                </Select>
+              </Field>
             </div>
+
+            <div className="rounded-md border border-slate-200 p-3">
+              <p className="mb-1 text-sm font-semibold text-slate-700">Access window</p>
+              <p className="mb-2 text-xs text-slate-500">Choose a plan and dates so the user can log in. Leave the plan blank to create a user with no access yet (they will be paused).</p>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <Field label="Plan">
+                  <Select name="plan" defaultValue="">
+                    <option value="">No access window</option>
+                    <option value="MONTHLY">MONTHLY</option>
+                    <option value="QUARTERLY">QUARTERLY</option>
+                    <option value="ANNUAL">ANNUAL</option>
+                  </Select>
+                </Field>
+                <Field label="Valid from"><Input name="valid_from" type="date" defaultValue={today} /></Field>
+                <Field label="Paid at"><Input name="paid_at" type="date" defaultValue={today} /></Field>
+              </div>
+            </div>
+
             {error ? <ErrorText>{error}</ErrorText> : null}
             <div className="flex justify-end gap-2">
               <Button type="button" variant="secondary" onClick={() => setShowCreate(false)}>Cancel</Button>
@@ -156,6 +196,11 @@ export function UsersPage() {
               <p className="text-emerald-900"><span className="font-semibold">Username:</span> {created.username}</p>
               <p className="text-emerald-900"><span className="font-semibold">Password:</span> {created.password}</p>
               <p className="text-emerald-900"><span className="font-semibold">License key:</span> {created.license_key}</p>
+              {created.valid_until ? (
+                <p className="text-emerald-900"><span className="font-semibold">Access valid until:</span> {created.valid_until}</p>
+              ) : (
+                <p className="text-amber-700">No access window set — this user will be paused until one is added.</p>
+              )}
             </div>
           )}
         </Modal>
