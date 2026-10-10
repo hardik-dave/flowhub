@@ -160,7 +160,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		userID = id
-		if err := h.store.InsertMembership(ctx, tx, tenant.ID, id, store.RoleAlgoUser); err != nil {
+		if err := h.store.InsertMembership(ctx, tx, tenant.ID, id, store.RoleUser); err != nil {
 			return err
 		}
 		if _, err := h.store.InsertLicense(ctx, tx, &store.License{

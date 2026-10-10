@@ -229,7 +229,7 @@ func (h *Handler) ImportCSV(w http.ResponseWriter, r *http.Request) {
 				}
 				return err
 			}
-			if err := h.store.InsertMembership(ctx, tx, sc.TenantID, uid, store.RoleAlgoUser); err != nil {
+			if err := h.store.InsertMembership(ctx, tx, sc.TenantID, uid, store.RoleUser); err != nil {
 				return err
 			}
 			lid, err := h.store.InsertLicense(ctx, tx, &store.License{

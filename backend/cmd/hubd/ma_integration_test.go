@@ -226,7 +226,7 @@ func TestRegisterOTPVerifyLogin(t *testing.T) {
 		} `json:"verify"`
 	}
 	decode(t, rec, &ok)
-	if ok.SessionToken == "" || ok.User.Role != "ALGO_USER" {
+	if ok.SessionToken == "" || ok.User.Role != "USER" {
 		t.Fatalf("login body = %s", rec.Body)
 	}
 	if ok.Verify.Status != "valid" || len(ok.Verify.Entitlements) == 0 {

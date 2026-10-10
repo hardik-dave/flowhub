@@ -40,7 +40,7 @@ function makeUser(over: Partial<UserView> = {}): UserView {
     state: '',
     status: 'ACTIVE',
     mobile_verified: true,
-    role: 'ALGO_USER',
+    role: 'USER',
     licenses: [],
     ...over,
   }

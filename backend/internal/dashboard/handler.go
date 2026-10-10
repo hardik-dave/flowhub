@@ -468,7 +468,7 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		userID = id
-		if err := h.store.InsertMembership(ctx, tx, sc.TenantID, id, store.RoleAlgoUser); err != nil {
+		if err := h.store.InsertMembership(ctx, tx, sc.TenantID, id, store.RoleUser); err != nil {
 			return err
 		}
 		lid, err := h.store.InsertLicense(ctx, tx, &store.License{
@@ -491,7 +491,7 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
-		after := map[string]any{"username": req.Username, "product_code": req.ProductCode, "role": string(store.RoleAlgoUser)}
+		after := map[string]any{"username": req.Username, "product_code": req.ProductCode, "role": string(store.RoleUser)}
 		if !validUntil.IsZero() {
 			after["valid_until"] = validUntil.Format("2006-01-02")
 		}

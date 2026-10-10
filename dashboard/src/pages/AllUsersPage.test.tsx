@@ -32,7 +32,7 @@ function makeRow(over: Partial<AllUserRow> = {}): AllUserRow {
     state: '',
     status: 'ACTIVE',
     mobile_verified: true,
-    role: 'ALGO_USER',
+    role: 'USER',
     licenses: [],
     tenant_id: 2,
     tenant_slug: 'acme',

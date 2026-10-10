@@ -77,13 +77,12 @@ type Role string
 const (
 	RoleSuperadmin Role = "SUPERADMIN"
 	RoleAdmin      Role = "ADMIN"
-	RoleEditor     Role = "EDITOR"
-	RoleAlgoUser   Role = "ALGO_USER"
+	RoleUser       Role = "USER"
 )
 
 // DashboardRole reports whether a role may use the §7 dashboard.
 func (r Role) DashboardRole() bool {
-	return r == RoleSuperadmin || r == RoleAdmin || r == RoleEditor
+	return r == RoleSuperadmin || r == RoleAdmin
 }
 
 type Membership struct {

@@ -4,7 +4,7 @@
 export type UserStatus = 'PENDING_VERIFICATION' | 'ACTIVE' | 'DEACTIVATED' | 'BANNED'
 export type LicenseStatus = 'ACTIVE' | 'DISABLED'
 export type TenantStatus = 'ACTIVE' | 'INACTIVE'
-export type Role = 'SUPERADMIN' | 'ADMIN' | 'EDITOR' | 'ALGO_USER' | ''
+export type Role = 'SUPERADMIN' | 'ADMIN' | 'USER' | ''
 
 export interface LicenseView {
   id: number

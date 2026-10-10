@@ -432,3 +432,18 @@ Format: date · decision · one line of why. The builder appends here
   §7 route → `TestRouteSurface` count 17→18. SPEC §7 did not list this
   endpoint; recorded here per rule 13 (it keeps §6.1 truthful and is the
   documented platform-admin exception).
+
+- 2026-10-10 · Rename the end-user role `ALGO_USER` → `USER`, and drop
+  the unused `EDITOR` role (owner decision). No code ever assigned
+  `EDITOR` — it existed only in the schema CHECK, `store.RoleEditor`,
+  `DashboardRole()`, the TS `Role` union, and docs. Migration
+  `0003_role_user` re-points the CHECK to
+  `('SUPERADMIN','ADMIN','USER')` and migrates existing `tenant_users`
+  rows in place (MySQL 8 auto-named the 0001 inline check
+  `tenant_users_chk_1`). Go: `RoleAlgoUser`→`RoleUser`, `RoleEditor`
+  removed, `DashboardRole()` = SUPERADMIN/ADMIN. This changes the `role`
+  **value** in `/app/login` and the dashboard responses, but not any
+  §6.1 `/app/verify` field/string (AGENTS rule 1 untouched); Optionalyzer
+  types `role: string` and never branches on it. Per owner direction,
+  SPEC.md and docs/MULTITENANT_PLAN.md keep the old text (historical);
+  this entry supersedes them.

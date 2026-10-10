@@ -213,7 +213,7 @@ func TestDashboardTenantLifecycle(t *testing.T) {
 		} `json:"user"`
 	}
 	decode(t, rec, &detail)
-	if len(detail.User.Licenses) != 1 || detail.User.Role != "ALGO_USER" {
+	if len(detail.User.Licenses) != 1 || detail.User.Role != "USER" {
 		t.Fatalf("get user body = %s", rec.Body)
 	}
 	licenseID := detail.User.Licenses[0].ID
